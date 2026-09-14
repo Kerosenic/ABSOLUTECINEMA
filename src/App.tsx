@@ -11,6 +11,7 @@ import {
   useToggleFollow, useAddScreening, useDeleteScreening, useAddPoll, useTogglePoll,
   useDeletePoll, useDeleteReview,
 } from "./lib/queries";
+import logoUrl from "../logo.png";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "home" | "calendar" | "leaderboard" | "profile" | "admin";
@@ -164,10 +165,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
         </button>
 
         <div className="flex items-center gap-2 mb-6">
-          <div className="w-7 h-7 rounded bg-[var(--accent)] flex items-center justify-center">
-            <svg className="w-4 h-4 text-[var(--accent-foreground)]" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" /></svg>
-          </div>
-          <span className="font-display font-800 text-base tracking-wide text-[var(--foreground)]">ABSOLUTE CINEMA</span>
+          <img src={logoUrl} alt="Absolute Cinema" className="h-8 w-auto" />
         </div>
 
         <h2 className="font-display font-900 text-3xl text-[var(--foreground)] mb-1">{mode === "signin" ? "WELCOME BACK" : "JOIN THE CLUB"}</h2>
@@ -250,10 +248,7 @@ function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSi
       <div className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between h-14 gap-4">
         {/* Logo */}
         <button onClick={() => navTo("home")} className="flex items-center gap-2 group flex-shrink-0">
-          <div className="w-7 h-7 rounded-lg bg-[var(--accent)] flex items-center justify-center group-hover:scale-105 transition-transform">
-            <svg className="w-4 h-4 text-[var(--accent-foreground)]" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" /></svg>
-          </div>
-          <span className="font-display font-900 text-base tracking-widest text-[var(--foreground)] group-hover:text-[var(--accent)] transition-colors">ABSOLUTE CINEMA</span>
+          <img src={logoUrl} alt="Absolute Cinema" className="h-7 w-auto group-hover:opacity-80 transition-opacity" />
         </button>
 
         {/* Desktop nav */}
@@ -1274,10 +1269,7 @@ function Footer({ setPage, isAdmin }: { setPage: (p: Page) => void; isAdmin: boo
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded-lg bg-[var(--accent)] flex items-center justify-center">
-              <svg className="w-3.5 h-3.5 text-[var(--accent-foreground)]" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h6a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6zm12.553 1.106A1 1 0 0014 8v4a1 1 0 00.553.894l2 1A1 1 0 0018 13V7a1 1 0 00-1.447-.894l-2 1z" /></svg>
-            </div>
-            <span className="font-display font-800 text-sm tracking-widest text-[var(--foreground)]">ABSOLUTE CINEMA</span>
+            <img src={logoUrl} alt="Absolute Cinema" className="h-6 w-auto" />
           </div>
           <div className="flex items-center gap-5 flex-wrap justify-center">
             {pages.map((p) => (
