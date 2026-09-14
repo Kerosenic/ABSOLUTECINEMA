@@ -4,15 +4,17 @@
 
 import { isSupabaseConfigured, requireSupabase } from "./supabase";
 import type {
-  Movie, Review, Reply, Poll, Screening, Vault, VaultTab, LeaderboardRow, Profile, Session,
+  Movie, Review, Reply, Poll, Screening, Vault, VaultTab, LeaderboardRow, Profile, Session, Notification, Announcement,
 } from "./types";
 import {
-  MOCK_USER, LEADERBOARD, MOVIES,
-  mockReviews, mockThreads, mockUserVotes, mockPolls, mockPollVotes,
-  mockScreenings, mockVault, mockFollowing,
+  MOCK_USER, LEADERBOARD,
+  mockMovies, mockReviews, mockThreads, mockUserVotes, mockPolls, mockPollVotes,
+  mockScreenings, mockVault, mockFollowing, mockNotifications, mockMarkNotificationsRead,
   mockVoteReview, mockAddReply, mockCreateReview, mockCastPollVote,
   mockToggleFavorite, mockSetVaultStatus, mockToggleFollow,
   mockAddScreening, mockDeleteScreening, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview,
+  mockAddMovie, mockDeleteMovie, mockDeleteComment,
+  mockMembers, mockSetMemberRole, mockAnnouncements, mockAddAnnouncement, mockDeleteAnnouncement,
 } from "./mock";
 
 function to12h(t: string): string {
@@ -25,9 +27,9 @@ function to12h(t: string): string {
 // ─── Session / auth ───────────────────────────────────────────────────────────
 export async function fetchProfile(userId: string): Promise<Profile | null> {
   const sb = requireSupabase();
-  const { data } = await sb.from("profiles").select("*").eq("id", userId).maybeSingle();
+  const { data } = await sb.from("profiles").select("id, username, role, avatar_url").eq("id", userId).maybeSingle();
   if (!data) return null;
-  return { id: data.id, username: data.username, role: data.role };
+  return { id: data.id, username: data.username, role: data.role, avatar_url: data.avatar_url ?? null };
 }
 
 export async function signInEmail(email: string, password: string): Promise<Session | null> {
@@ -58,7 +60,7 @@ export async function signOut(): Promise<void> {
 
 // ─── Reads ────────────────────────────────────────────────────────────────────
 export async function listMovies(): Promise<Movie[]> {
-  if (!isSupabaseConfigured) return MOVIES;
+  if (!isSupabaseConfigured) return mockMovies();
   const sb = requireSupabase();
   const { data } = await sb.from("movies").select("*").order("year", { ascending: false });
   return (data ?? []).map((m: any) => ({
@@ -70,14 +72,16 @@ export async function listMovies(): Promise<Movie[]> {
 export async function listReviews(): Promise<Review[]> {
   if (!isSupabaseConfigured) return mockReviews();
   const sb = requireSupabase();
+  const uid = await currentUserId();
   const [{ data: reviews }, { data: profiles }, { data: votes }] = await Promise.all([
     sb.from("reviews").select("*").order("created_at", { ascending: false }),
     sb.from("profiles").select("id, username"),
-    sb.from("review_votes").select("review_id, direction"),
+    sb.from("review_votes").select("review_id, direction, user_id"),
   ]);
   const username = new Map<string, string>((profiles ?? []).map((p: any) => [p.id, p.username]));
   const tally = new Map<string, { up: number; down: number }>();
   for (const v of votes ?? []) {
+    if (uid && v.user_id === uid) continue; // own vote is layered on via myReviewVotes
     const t = tally.get(v.review_id) ?? { up: 0, down: 0 };
     if (v.direction === 1) t.up += 1; else t.down += 1;
     tally.set(v.review_id, t);
@@ -111,13 +115,17 @@ export async function listThreads(): Promise<Record<string, Reply[]>> {
 export async function listPolls(): Promise<Poll[]> {
   if (!isSupabaseConfigured) return mockPolls();
   const sb = requireSupabase();
+  const uid = await currentUserId();
   const [{ data: polls }, { data: options }, { data: votes }] = await Promise.all([
     sb.from("polls").select("*").order("created_at", { ascending: false }),
     sb.from("poll_options").select("*").order("position", { ascending: true }),
-    sb.from("poll_votes").select("option_id"),
+    sb.from("poll_votes").select("option_id, user_id"),
   ]);
   const tally = new Map<string, number>();
-  for (const v of votes ?? []) tally.set(v.option_id, (tally.get(v.option_id) ?? 0) + 1);
+  for (const v of votes ?? []) {
+    if (uid && v.user_id === uid) continue; // own vote is layered on via myPollVotes
+    tally.set(v.option_id, (tally.get(v.option_id) ?? 0) + 1);
+  }
   return (polls ?? []).map((p: any) => ({
     id: p.id,
     question: p.title,
@@ -145,9 +153,7 @@ export async function getLeaderboard(): Promise<LeaderboardRow[]> {
 }
 
 export async function listMembers(): Promise<Profile[]> {
-  if (!isSupabaseConfigured) {
-    return LEADERBOARD.map((m, i) => ({ id: `u${i + 1}`, username: m.username, role: (i === 0 ? "admin" : "member") as Profile["role"] }));
-  }
+  if (!isSupabaseConfigured) return mockMembers();
   const sb = requireSupabase();
   const { data } = await sb.from("profiles").select("id, username, role").order("username");
   return (data ?? []).map((p: any) => ({ id: p.id, username: p.username, role: p.role }));
@@ -197,6 +203,31 @@ export async function getMyPollVotes(userId: string): Promise<Record<string, num
     if (idx >= 0) out[v.poll_id] = idx;
   }
   return out;
+}
+
+export async function listNotifications(): Promise<Notification[]> {
+  if (!isSupabaseConfigured) return mockNotifications();
+  const sb = requireSupabase();
+  const uid = await currentUserId();
+  if (!uid) return [];
+  const { data } = await sb.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(30);
+  return (data ?? []).map((n: any) => ({
+    id: n.id, type: n.type, body: n.body, link: n.link ?? null, read: n.read, created_at: n.created_at,
+  }));
+}
+
+export async function listAnnouncements(): Promise<Announcement[]> {
+  if (!isSupabaseConfigured) return mockAnnouncements();
+  const sb = requireSupabase();
+  const [{ data: anns }, { data: profiles }] = await Promise.all([
+    sb.from("announcements").select("*").order("created_at", { ascending: false }).limit(20),
+    sb.from("profiles").select("id, username"),
+  ]);
+  const username = new Map<string, string>((profiles ?? []).map((p: any) => [p.id, p.username]));
+  return (anns ?? []).map((a: any) => ({
+    id: a.id, title: a.title, body: a.body,
+    author: username.get(a.author_id) ?? "Admin", created_at: a.created_at,
+  }));
 }
 
 // ─── Mutations ────────────────────────────────────────────────────────────────
@@ -347,4 +378,89 @@ export async function deletePoll(id: string): Promise<void> {
 export async function deleteReview(id: string): Promise<void> {
   if (!isSupabaseConfigured) { mockDeleteReview(id); return; }
   await requireSupabase().from("reviews").delete().eq("id", id);
+}
+
+export async function markNotificationsRead(): Promise<void> {
+  if (!isSupabaseConfigured) { mockMarkNotificationsRead(); return; }
+  const sb = requireSupabase();
+  const uid = await currentUserId();
+  if (!uid) return;
+  await sb.from("notifications").update({ read: true }).eq("user_id", uid).eq("read", false);
+}
+
+export async function addMovie(input: { title: string; year: number; genre: string; rating: number; director: string; poster: string }): Promise<Movie> {
+  if (!isSupabaseConfigured) return mockAddMovie(input);
+  const sb = requireSupabase();
+  const id = crypto.randomUUID();
+  await sb.from("movies").insert({
+    id, title: input.title, year: input.year, genre: input.genre,
+    rating: input.rating, director: input.director, poster_url: input.poster || null,
+  });
+  return { id, ...input };
+}
+
+export async function deleteMovie(id: string): Promise<void> {
+  if (!isSupabaseConfigured) { mockDeleteMovie(id); return; }
+  await requireSupabase().from("movies").delete().eq("id", id);
+}
+
+export async function deleteComment(id: string): Promise<void> {
+  if (!isSupabaseConfigured) { mockDeleteComment(id); return; }
+  await requireSupabase().from("comments").delete().eq("id", id);
+}
+
+export async function addAnnouncement(input: { title: string; body: string }): Promise<Announcement> {
+  if (!isSupabaseConfigured) return mockAddAnnouncement(input);
+  const sb = requireSupabase();
+  const uid = await currentUserId();
+  if (!uid) throw new Error("Sign in to post an announcement");
+  await sb.from("announcements").insert({ author_id: uid, title: input.title, body: input.body });
+  const profile = await fetchProfile(uid);
+  return { id: "", title: input.title, body: input.body, author: profile?.username ?? "Admin", created_at: new Date().toISOString() };
+}
+
+export async function deleteAnnouncement(id: string): Promise<void> {
+  if (!isSupabaseConfigured) { mockDeleteAnnouncement(id); return; }
+  await requireSupabase().from("announcements").delete().eq("id", id);
+}
+
+export async function setMemberRole(userId: string, role: "member" | "admin"): Promise<void> {
+  if (!isSupabaseConfigured) { mockSetMemberRole(userId, role); return; }
+  await requireSupabase().from("profiles").update({ role }).eq("id", userId);
+}
+
+// ─── Storage ─────────────────────────────────────────────────────────────────
+// In mock mode uploads resolve to a local object URL so the UI still previews
+// the chosen image; in live mode they hit Supabase Storage and return the
+// public URL for that bucket.
+export async function uploadPoster(file: File): Promise<string> {
+  if (!isSupabaseConfigured) return URL.createObjectURL(file);
+  const sb = requireSupabase();
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `${crypto.randomUUID()}.${ext}`;
+  const { error } = await sb.storage.from("posters").upload(path, file);
+  if (error) throw error;
+  const { data } = sb.storage.from("posters").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function uploadAvatar(file: File): Promise<string> {
+  if (!isSupabaseConfigured) return URL.createObjectURL(file);
+  const sb = requireSupabase();
+  const uid = await currentUserId();
+  if (!uid) throw new Error("Sign in to upload an avatar");
+  const ext = file.name.split(".").pop() || "jpg";
+  const path = `${uid}/${crypto.randomUUID()}.${ext}`;
+  const { error } = await sb.storage.from("avatars").upload(path, file);
+  if (error) throw error;
+  const { data } = sb.storage.from("avatars").getPublicUrl(path);
+  return data.publicUrl;
+}
+
+export async function updateAvatar(url: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const sb = requireSupabase();
+  const uid = await currentUserId();
+  if (!uid) return;
+  await sb.from("profiles").update({ avatar_url: url }).eq("id", uid);
 }

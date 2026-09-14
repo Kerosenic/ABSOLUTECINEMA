@@ -1,7 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import type { Movie, Review, Reply, Poll, Screening, VaultTab, LeaderboardRow, Profile, Session } from "./lib/types";
+import type { Movie, Review, Reply, Poll, Screening, VaultTab, LeaderboardRow, Profile, Session, Announcement } from "./lib/types";
 import { initials, timeAgo, badgeFor, fmtCloses, fmtDate, MONTH_NAMES } from "./lib/format";
 import { isSupabaseConfigured } from "./lib/supabase";
+import { reviewSchema, pollSchema, screeningSchema, movieSchema, announcementSchema, signInSchema, signUpSchema, parseForm, type FieldErrors } from "./lib/validation";
 import { GENRES, YEARS, RATINGS, TRENDING_IDS } from "./lib/mock";
 import {
   useInitAuth, useSession, useAuth,
@@ -9,8 +10,13 @@ import {
   useVault, useFollowing, useMyReviewVotes, useMyPollVotes,
   useCreateReview, useVoteReview, useAddReply, useCastPollVote, useToggleFavorite,
   useToggleFollow, useAddScreening, useDeleteScreening, useAddPoll, useTogglePoll,
-  useDeletePoll, useDeleteReview,
+  useDeletePoll, useDeleteReview, useNotifications, useMarkNotificationsRead,
+  useAddMovie, useDeleteMovie, useDeleteComment,
+  useAnnouncements, useAddAnnouncement, useDeleteAnnouncement, useSetMemberRole,
 } from "./lib/queries";
+import { useRealtime } from "./lib/realtime";
+import { setSession } from "./lib/session";
+import { uploadAvatar, updateAvatar, uploadPoster } from "./lib/api";
 import logoUrl from "../logo.png";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +64,43 @@ function useToast() {
   return { toasts, push };
 }
 
+// ─── Dialog a11y ──────────────────────────────────────────────────────────────
+// Traps Tab inside a dialog, focuses the first control on open, and restores
+// focus to the previously-focused element on close.
+function useFocusTrap(active: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const node = ref.current;
+    if (!node) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const focusable = () =>
+      Array.from(node.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+        .filter((el) => !el.hasAttribute("disabled") && el.getAttribute("aria-hidden") !== "true");
+    focusable()[0]?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const els = focusable();
+      if (els.length === 0) return;
+      const firstEl = els[0];
+      const lastEl = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === firstEl) {
+        e.preventDefault();
+        lastEl.focus();
+      } else if (!e.shiftKey && document.activeElement === lastEl) {
+        e.preventDefault();
+        firstEl.focus();
+      }
+    };
+    node.addEventListener("keydown", onKey);
+    return () => {
+      node.removeEventListener("keydown", onKey);
+      previous?.focus?.();
+    };
+  }, [active]);
+  return ref;
+}
+
 // ─── Atoms ────────────────────────────────────────────────────────────────────
 function StarRating({ rating, max = 10 }: { rating: number; max?: number }) {
   const filled = Math.round((rating / max) * 5);
@@ -78,18 +121,19 @@ function InteractiveStars({ value, onChange }: { value: number; onChange: (v: nu
     <div className="flex items-center gap-1">
       {Array.from({ length: 10 }).map((_, i) => (
         <button key={i} onClick={() => onChange(i + 1)} onMouseEnter={() => setHover(i + 1)} onMouseLeave={() => setHover(0)}
+          aria-label={`Rate ${i + 1} of 10`} aria-pressed={i < value}
           className={`text-lg transition-all ${i < (hover || value) ? "text-[var(--star)] scale-110" : "text-[var(--border)]"}`}>★</button>
       ))}
     </div>
   );
 }
 
-function Avt({ initials: text, size = "md", color }: { initials: string; size?: "xs" | "sm" | "md" | "lg"; color?: string }) {
+function Avt({ initials: text, size = "md", color, src }: { initials: string; size?: "xs" | "sm" | "md" | "lg"; color?: string; src?: string | null }) {
   const s = { xs: "w-6 h-6 text-[10px]", sm: "w-8 h-8 text-xs", md: "w-10 h-10 text-sm", lg: "w-14 h-14 text-base" }[size];
   const bg = color || "from-[var(--accent)] to-[var(--primary)]";
   return (
-    <div className={`${s} rounded-full bg-gradient-to-br ${bg} flex items-center justify-center font-display font-bold text-[var(--accent-foreground)] flex-shrink-0`}>
-      {text}
+    <div className={`${s} rounded-full bg-gradient-to-br ${bg} flex items-center justify-center font-display font-bold text-[var(--accent-foreground)] flex-shrink-0 overflow-hidden`}>
+      {src ? <img src={src} alt="" className="w-full h-full object-cover" /> : text}
     </div>
   );
 }
@@ -126,7 +170,9 @@ function SignInModal({ onClose }: { onClose: () => void }) {
   const [username, setUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const auth = useAuth();
+  const ref = useFocusTrap(true);
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -137,7 +183,9 @@ function SignInModal({ onClose }: { onClose: () => void }) {
   const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
 
   const submit = async () => {
-    if (!email || !pass) return;
+    const { errors } = parseForm(mode === "signin" ? signInSchema : signUpSchema, { email, password: pass, username });
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) return;
     setBusy(true);
     setError(null);
     try {
@@ -159,8 +207,8 @@ function SignInModal({ onClose }: { onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className="relative bg-[var(--card)] border border-[var(--border)] rounded-2xl p-8 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute top-4 right-4 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+      <div ref={ref} role="dialog" aria-modal="true" aria-label={mode === "signin" ? "Sign in" : "Create account"} className="relative bg-[var(--card)] border border-[var(--border)] rounded-2xl p-8 w-full max-w-sm shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
 
@@ -173,10 +221,19 @@ function SignInModal({ onClose }: { onClose: () => void }) {
 
         <div className="flex flex-col gap-3 mb-5">
           {mode === "signup" && (
-            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+            <div>
+              <input value={username} onChange={(e) => { setUsername(e.target.value); setFieldErrors((f) => ({ ...f, username: "" })); }} placeholder="Username" aria-invalid={!!fieldErrors.username} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+              {fieldErrors.username && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.username}</p>}
+            </div>
           )}
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
-          <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Password" className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+          <div>
+            <input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setFieldErrors((f) => ({ ...f, email: "" })); }} placeholder="Email address" aria-invalid={!!fieldErrors.email} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+            {fieldErrors.email && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.email}</p>}
+          </div>
+          <div>
+            <input type="password" value={pass} onChange={(e) => { setPass(e.target.value); setFieldErrors((f) => ({ ...f, password: "" })); }} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Password" aria-invalid={!!fieldErrors.password} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+            {fieldErrors.password && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.password}</p>}
+          </div>
         </div>
 
         {error && <p className="text-xs text-[var(--accent)] mb-4">{error}</p>}
@@ -193,11 +250,77 @@ function SignInModal({ onClose }: { onClose: () => void }) {
 
         <p className="text-xs text-center text-[var(--muted-foreground)] mt-4">
           {mode === "signin" ? "New here?" : "Already a member?"}{" "}
-          <button onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(null); }} className="text-[var(--accent)] font-semibold hover:opacity-80">
+          <button onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(null); setFieldErrors({}); }} className="text-[var(--accent)] font-semibold hover:opacity-80">
             {mode === "signin" ? "Create an account" : "Sign in"}
           </button>
         </p>
       </div>
+    </div>
+  );
+}
+
+// ─── Notification bell ────────────────────────────────────────────────────────
+function NotificationBell({ onNavigate }: { onNavigate: (link?: string | null) => void }) {
+  const { data: notifications = [] } = useNotifications();
+  const markRead = useMarkNotificationsRead();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const unread = notifications.filter((n) => !n.read).length;
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (next && unread > 0) markRead.mutate();
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <button onClick={toggle}
+        aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+        aria-expanded={open}
+        className="relative p-1.5 text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+        </svg>
+        {unread > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-[var(--accent)] text-black text-[10px] font-bold flex items-center justify-center">
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="fixed inset-x-4 top-16 z-[60] rounded-xl border border-[var(--border)] bg-[var(--card)] shadow-xl overflow-hidden lg:absolute lg:inset-x-auto lg:top-full lg:right-0 lg:mt-2 lg:w-80">
+          <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between">
+            <span className="text-sm font-semibold text-[var(--foreground)]">Notifications</span>
+            {unread > 0 && (
+              <button onClick={() => markRead.mutate()} className="text-xs font-medium text-[var(--accent)] hover:opacity-80">Mark all read</button>
+            )}
+          </div>
+          <div className="max-h-80 overflow-y-auto">
+            {notifications.length === 0 ? (
+              <p className="px-4 py-8 text-sm text-[var(--muted-foreground)] text-center">No notifications yet.</p>
+            ) : (
+              notifications.map((n) => (
+                <button key={n.id} onClick={() => { setOpen(false); onNavigate(n.link); }}
+                  className={`w-full text-left px-4 py-3 border-b border-[var(--border)] last:border-b-0 hover:bg-[var(--muted)]/40 transition-colors ${n.read ? "" : "bg-[var(--accent)]/5"}`}>
+                  <span className="block text-sm text-[var(--foreground)]">{n.body}</span>
+                  <span className="block text-xs text-[var(--muted-foreground)] mt-0.5">{timeAgo(n.created_at)}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -225,6 +348,17 @@ function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSi
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
     setMenuOpen(false);
+  };
+
+  const onNotifNav = (link?: string | null) => {
+    setMenuOpen(false);
+    if (link) {
+      setPage("home");
+      setTimeout(() => document.getElementById("reviews")?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    } else {
+      setPage("profile");
+      window.scrollTo({ top: 0 });
+    }
   };
 
   const navLinks = [
@@ -263,7 +397,7 @@ function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSi
 
         {/* Actions */}
         <div className="hidden lg:flex items-center gap-3 flex-shrink-0">
-          <button onClick={() => setDark(!dark)} title={dark ? "Switch to light mode" : "Switch to dark mode"} className="relative w-11 h-6 rounded-full border border-[var(--border)] bg-[var(--muted)] transition-colors hover:border-[var(--accent)]/50">
+          <button onClick={() => setDark(!dark)} title={dark ? "Switch to light mode" : "Switch to dark mode"} aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} aria-pressed={dark} className="relative w-11 h-6 rounded-full border border-[var(--border)] bg-[var(--muted)] transition-colors hover:border-[var(--accent)]/50">
             <span className={`absolute top-0.5 w-5 h-5 rounded-full flex items-center justify-center transition-all duration-300 ${dark ? "left-0.5 bg-[var(--muted-foreground)]" : "left-5 bg-[var(--accent)]"}`}>
               {dark ? (
                 <svg className="w-3 h-3 text-[var(--background)]" fill="currentColor" viewBox="0 0 20 20"><path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" /></svg>
@@ -272,10 +406,11 @@ function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSi
               )}
             </span>
           </button>
+          {session && <NotificationBell onNavigate={onNotifNav} />}
           {session ? (
             <>
               <button onClick={() => navTo("profile")} className="flex items-center gap-1.5 text-sm text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
-                <Avt initials={initials(session.user.username)} size="xs" />
+                <Avt initials={initials(session.user.username)} size="xs" src={session.user.avatar_url} />
                 <span className="font-medium">{session.user.username}</span>
               </button>
               <button onClick={onSignOut} className="text-sm font-medium text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">SIGN OUT</button>
@@ -289,10 +424,11 @@ function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSi
 
         {/* Mobile right */}
         <div className="lg:hidden flex items-center gap-2">
-          <button onClick={() => setDark(!dark)} className="relative w-10 h-5 rounded-full border border-[var(--border)] bg-[var(--muted)]">
+          {session && <NotificationBell onNavigate={onNotifNav} />}
+          <button onClick={() => setDark(!dark)} aria-label={dark ? "Switch to light mode" : "Switch to dark mode"} aria-pressed={dark} className="relative w-10 h-5 rounded-full border border-[var(--border)] bg-[var(--muted)]">
             <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-[var(--accent)] transition-all duration-300 ${dark ? "left-0.5" : "left-5"}`} />
           </button>
-          <button onClick={() => setMenuOpen(!menuOpen)} className="p-1.5 text-[var(--foreground)]">
+          <button onClick={() => setMenuOpen(!menuOpen)} aria-label={menuOpen ? "Close menu" : "Open menu"} aria-expanded={menuOpen} className="p-1.5 text-[var(--foreground)]">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               {menuOpen ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
             </svg>
@@ -384,7 +520,7 @@ function HeroBanner({ movies, reviews }: { movies: Movie[]; reviews: Review[] })
         {/* Slide indicators */}
         <div className="flex items-center gap-2 mt-8">
           {featured.map((_, i) => (
-            <button key={i} onClick={() => setActiveIdx(i)} className={`h-0.5 transition-all rounded-full ${i === activeIdx ? "w-8 bg-[var(--accent)]" : "w-3 bg-[var(--foreground)]/30 hover:bg-[var(--foreground)]/50"}`} />
+            <button key={i} onClick={() => setActiveIdx(i)} aria-label={`Show slide ${i + 1}`} className={`h-0.5 transition-all rounded-full ${i === activeIdx ? "w-8 bg-[var(--accent)]" : "w-3 bg-[var(--foreground)]/30 hover:bg-[var(--foreground)]/50"}`} />
           ))}
         </div>
       </div>
@@ -405,7 +541,7 @@ function MovieRow({ title, pre, movieIds, movies, favorites, onToggleFavorite }:
     <div className="relative group/row">
       <SectionHeader label={title} pre={pre} />
       <div className="relative">
-        <button onClick={() => scroll("left")} className="absolute left-0 top-0 bottom-0 z-10 w-10 bg-gradient-to-r from-[var(--background)] to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-start pl-1">
+        <button onClick={() => scroll("left")} aria-label="Scroll left" className="absolute left-0 top-0 bottom-0 z-10 w-10 bg-gradient-to-r from-[var(--background)] to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-start pl-1">
           <svg className="w-5 h-5 text-[var(--foreground)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
         </button>
         <div ref={rowRef} className="flex gap-3 overflow-x-auto hide-scrollbar pb-2">
@@ -413,7 +549,7 @@ function MovieRow({ title, pre, movieIds, movies, favorites, onToggleFavorite }:
             <RowCard key={movie.id} movie={movie} saved={favorites.includes(movie.id)} onToggle={() => onToggleFavorite(movie.id)} />
           ))}
         </div>
-        <button onClick={() => scroll("right")} className="absolute right-0 top-0 bottom-0 z-10 w-10 bg-gradient-to-l from-[var(--background)] to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-end pr-1">
+        <button onClick={() => scroll("right")} aria-label="Scroll right" className="absolute right-0 top-0 bottom-0 z-10 w-10 bg-gradient-to-l from-[var(--background)] to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-end pr-1">
           <svg className="w-5 h-5 text-[var(--foreground)]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
         </button>
       </div>
@@ -425,14 +561,14 @@ function RowCard({ movie, saved, onToggle }: { movie: Movie; saved: boolean; onT
   return (
     <div className="group flex-shrink-0 w-32 sm:w-36 cursor-pointer">
       <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] mb-2">
-        <img src={movie.poster} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+        <img src={movie.poster} alt={movie.title} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.opacity = "0"; }} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
         <div className="absolute bottom-0 left-0 right-0 p-2.5 translate-y-2 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1">
               <span className="text-xs font-bold text-[var(--star)]">★ {movie.rating}</span>
             </div>
-            <button onClick={(e) => { e.stopPropagation(); onToggle(); }} className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${saved ? "bg-[var(--accent)] text-black" : "bg-black/50 text-white hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"}`}>
+            <button onClick={(e) => { e.stopPropagation(); onToggle(); }} aria-label={saved ? "Remove from favorites" : "Add to favorites"} className={`w-7 h-7 rounded-full flex items-center justify-center transition-all ${saved ? "bg-[var(--accent)] text-black" : "bg-black/50 text-white hover:bg-[var(--accent)] hover:text-[var(--accent-foreground)]"}`}>
               <svg className="w-3.5 h-3.5" fill={saved ? "currentColor" : "none"} stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
             </button>
           </div>
@@ -469,7 +605,7 @@ function ReviewCard({ review, replies, userVote, onVote, onReply, movies }: {
     <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl overflow-hidden hover:border-[var(--accent)]/30 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-black/20 flex flex-col">
       <div className="flex gap-4 p-4 pb-3">
         <div className="relative flex-shrink-0">
-          <img src={movie.poster} alt={movie.title} className="w-[72px] h-[100px] object-cover rounded-xl bg-[var(--muted)]" />
+          <img src={movie.poster} alt={movie.title} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.opacity = "0"; }} className="w-[72px] h-[100px] object-cover rounded-xl bg-[var(--muted)]" />
           <div className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full bg-[var(--accent)] border-2 border-[var(--card)] flex items-center justify-center shadow">
             <span className="text-xs font-display font-900 text-[var(--accent-foreground)] leading-none">{review.rating}</span>
           </div>
@@ -493,11 +629,11 @@ function ReviewCard({ review, replies, userVote, onVote, onReply, movies }: {
       </div>
 
       <div className="px-4 py-2.5 flex items-center gap-4 border-t border-[var(--border)] mt-auto">
-        <button onClick={() => onVote(review.id, "up")} className={`flex items-center gap-1.5 text-sm font-medium transition-all hover:scale-105 ${userVote === "up" ? "text-[var(--accent)]" : "text-[var(--muted-foreground)] hover:text-[var(--accent)]"}`}>
+        <button onClick={() => onVote(review.id, "up")} aria-label={`Upvote (${up})`} aria-pressed={userVote === "up"} className={`flex items-center gap-1.5 text-sm font-medium transition-all hover:scale-105 ${userVote === "up" ? "text-[var(--accent)]" : "text-[var(--muted-foreground)] hover:text-[var(--accent)]"}`}>
           <svg className="w-4 h-4" fill={userVote === "up" ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 15l7-7 7 7" /></svg>
           {up}
         </button>
-        <button onClick={() => onVote(review.id, "down")} className={`flex items-center gap-1.5 text-sm font-medium transition-all hover:scale-105 ${userVote === "down" ? "text-blue-400" : "text-[var(--muted-foreground)] hover:text-blue-400"}`}>
+        <button onClick={() => onVote(review.id, "down")} aria-label={`Downvote (${down})`} aria-pressed={userVote === "down"} className={`flex items-center gap-1.5 text-sm font-medium transition-all hover:scale-105 ${userVote === "down" ? "text-blue-400" : "text-[var(--muted-foreground)] hover:text-blue-400"}`}>
           <svg className="w-4 h-4" fill={userVote === "down" ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" /></svg>
           {down}
         </button>
@@ -537,38 +673,51 @@ function WriteReviewModal({ onClose, onSubmit, movies }: { onClose: () => void; 
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState("");
   const [movieId, setMovieId] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const ref = useFocusTrap(true);
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [onClose]);
 
   const submit = () => {
-    if (!movieId || !rating || !body.trim()) return;
-    onSubmit(movieId, rating, body.trim());
+    const { data, errors } = parseForm(reviewSchema, { movie_id: movieId, rating, body });
+    setFieldErrors(errors);
+    if (Object.keys(errors).length) return;
+    onSubmit(data.movie_id, data.rating, data.body);
   };
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
-      <div className="relative bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <button onClick={onClose} className="absolute top-4 right-4 text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
+      <div ref={ref} role="dialog" aria-modal="true" aria-label="Write a review" className="relative bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 w-full max-w-md shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} aria-label="Close" className="absolute top-4 right-4 text-[var(--muted-foreground)] hover:text-[var(--foreground)]">
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
         </button>
         <h2 className="font-display font-900 text-2xl text-[var(--foreground)] mb-5">WRITE A REVIEW</h2>
         <div className="flex flex-col gap-4">
           <div>
             <label className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 block">Movie</label>
-            <select value={movieId} onChange={(e) => setMovieId(e.target.value)} className="w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)] transition-colors">
+            <select value={movieId} onChange={(e) => { setMovieId(e.target.value); setFieldErrors((f) => ({ ...f, movie_id: "" })); }} aria-invalid={!!fieldErrors.movie_id} className="w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)] transition-colors">
               <option value="">Select a movie…</option>
               {movies.map((m) => <option key={m.id} value={m.id}>{m.title} ({m.year})</option>)}
             </select>
+            {fieldErrors.movie_id && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.movie_id}</p>}
           </div>
           <div>
             <label className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 block">Your Rating</label>
             <div className="flex items-center gap-3">
-              <InteractiveStars value={rating} onChange={setRating} />
+              <InteractiveStars value={rating} onChange={(v) => { setRating(v); setFieldErrors((f) => ({ ...f, rating: "" })); }} />
               {rating > 0 && <span className="text-sm font-bold text-[var(--accent)]">{rating}/10</span>}
             </div>
+            {fieldErrors.rating && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.rating}</p>}
           </div>
           <div>
             <label className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 block">Review</label>
-            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={4} placeholder="What did you think?" className="w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors resize-none" />
+            <textarea value={body} onChange={(e) => { setBody(e.target.value); setFieldErrors((f) => ({ ...f, body: "" })); }} rows={4} placeholder="What did you think?" aria-invalid={!!fieldErrors.body} className="w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors resize-none" />
+            {fieldErrors.body && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.body}</p>}
           </div>
           <button onClick={submit} disabled={!movieId || !rating || !body.trim()} className="btn-parallelogram w-full py-3 bg-[var(--accent)] text-black font-bold transition-all text-sm tracking-wide disabled:opacity-40 hover:opacity-90">
             PUBLISH REVIEW
@@ -610,7 +759,7 @@ function PollCard({ poll, myVote, onVote }: { poll: Poll; myVote: number | null;
           const isWinner = myVote !== null && optVotes[i] === maxVotes;
           const isVoted = myVote === i;
           return (
-            <button key={opt.id} onClick={() => castVote(i)} disabled={myVote !== null || closed} className={`relative w-full text-left rounded-xl overflow-hidden border transition-all duration-200 ${isVoted ? "border-[var(--accent)] bg-[var(--accent)]/5" : myVote !== null || closed ? "border-[var(--border)] cursor-default" : "border-[var(--border)] hover:border-[var(--accent)]/50 hover:bg-[var(--muted)]"}`}>
+            <button key={opt.id} onClick={() => castVote(i)} disabled={myVote !== null || closed} aria-pressed={isVoted} className={`relative w-full text-left rounded-xl overflow-hidden border transition-all duration-200 ${isVoted ? "border-[var(--accent)] bg-[var(--accent)]/5" : myVote !== null || closed ? "border-[var(--border)] cursor-default" : "border-[var(--border)] hover:border-[var(--accent)]/50 hover:bg-[var(--muted)]"}`}>
               {myVote !== null && (
                 <div className={`absolute inset-y-0 left-0 transition-all duration-700 ease-out rounded-xl ${isWinner ? "bg-[var(--accent)]/15" : "bg-[var(--muted)]"}`} style={{ width: `${pct}%` }} />
               )}
@@ -640,13 +789,13 @@ function LibCard({ movie, saved, onToggle }: { movie: Movie; saved: boolean; onT
   return (
     <div className="group relative cursor-pointer">
       <div className="aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] relative">
-        <img src={movie.poster} alt={movie.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+        <img src={movie.poster} alt={movie.title} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.opacity = "0"; }} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
         <div className="absolute inset-x-0 bottom-0 p-2.5 translate-y-1 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300">
           <p className="text-white text-xs font-bold leading-tight">{movie.title}</p>
           <div className="flex items-center justify-between mt-1">
             <span className="text-[var(--star)] text-xs font-bold">★ {movie.rating}</span>
-            <button onClick={(e) => { e.stopPropagation(); onToggle(); }} className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${saved ? "bg-[var(--accent)]" : "bg-white/10 hover:bg-[var(--accent)]"}`}>
+            <button onClick={(e) => { e.stopPropagation(); onToggle(); }} aria-label={saved ? "Remove from favorites" : "Add to favorites"} className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${saved ? "bg-[var(--accent)]" : "bg-white/10 hover:bg-[var(--accent)]"}`}>
               <svg className="w-3 h-3 text-white" fill={saved ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" /></svg>
             </button>
           </div>
@@ -660,16 +809,23 @@ function LibCard({ movie, saved, onToggle }: { movie: Movie; saved: boolean; onT
 }
 
 // ─── Home Page ────────────────────────────────────────────────────────────────
-function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls, pollVotes, onPollVote, favorites, onToggleFavorite, onWriteReview }: {
+function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls, pollVotes, onPollVote, favorites, onToggleFavorite, onWriteReview, announcements }: {
   movies: Movie[]; reviews: Review[]; threads: Record<string, Reply[]>; userVotes: Record<string, "up" | "down" | null>; onVote: (id: string, dir: "up" | "down") => void; onReply: (id: string, body: string) => void;
   polls: Poll[]; pollVotes: Record<string, number>; onPollVote: (pollId: string, idx: number) => void;
   favorites: string[]; onToggleFavorite: (id: string) => void; onWriteReview: (movieId: string, rating: number, body: string) => void;
+  announcements: Announcement[];
 }) {
   const [genre, setGenre] = useState("All");
   const [year, setYear] = useState("All");
   const [rating, setRating] = useState("All");
   const [query, setQuery] = useState("");
   const [showWriteReview, setShowWriteReview] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(50);
+
+  // Reset pagination whenever filters/search change so "Show more" starts fresh.
+  useEffect(() => {
+    setVisibleCount(50);
+  }, [genre, year, rating, query]);
 
   const filtered = movies.filter((m) => {
     if (genre !== "All" && m.genre !== genre) return false;
@@ -689,6 +845,24 @@ function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls,
       {showWriteReview && <WriteReviewModal onClose={() => setShowWriteReview(false)} onSubmit={(movieId, rating, body) => { onWriteReview(movieId, rating, body); setShowWriteReview(false); }} movies={movies} />}
 
       <HeroBanner movies={movies} reviews={reviews} />
+
+      {/* Announcements */}
+      {announcements.length > 0 && (
+        <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-8">
+          <div className="flex flex-col gap-2">
+            {announcements.slice(0, 3).map((a) => (
+              <div key={a.id} className="bg-[var(--card)] border border-[var(--border)] border-l-4 border-l-[var(--accent)] rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-[var(--accent)]">Announcement</span>
+                  <span className="text-[10px] text-[var(--muted-foreground)]">{timeAgo(a.created_at)}</span>
+                </div>
+                <p className="font-display font-700 text-sm text-[var(--foreground)]">{a.title}</p>
+                <p className="text-xs text-[var(--muted-foreground)] mt-0.5">{a.body}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Trending Row */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 pb-6">
@@ -739,7 +913,7 @@ function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls,
           ))}
         </div>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
-          {filtered.map((m) => <LibCard key={m.id} movie={m} saved={favorites.includes(m.id)} onToggle={() => onToggleFavorite(m.id)} />)}
+          {filtered.slice(0, visibleCount).map((m) => <LibCard key={m.id} movie={m} saved={favorites.includes(m.id)} onToggle={() => onToggleFavorite(m.id)} />)}
           {filtered.length === 0 && (
             <div className="col-span-full py-20 text-center">
               <p className="font-display font-900 text-3xl text-[var(--muted-foreground)]">NO RESULTS</p>
@@ -747,6 +921,14 @@ function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls,
             </div>
           )}
         </div>
+        {filtered.length > visibleCount && (
+          <div className="mt-8 text-center">
+            <button onClick={() => setVisibleCount((c) => c + 50)} className="btn-parallelogram inline-flex items-center gap-2 px-6 py-2.5 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity">
+              Show More
+              <span className="text-xs font-bold opacity-70">({filtered.length - visibleCount} more)</span>
+            </button>
+          </div>
+        )}
       </section>
     </>
   );
@@ -800,11 +982,11 @@ function CalendarPage({ screenings, push }: { screenings: Screening[]; push: (t:
           <h2 className="font-display font-900 text-4xl sm:text-5xl leading-none text-[var(--foreground)]">{MONTH_NAMES[view.m]} {view.y}</h2>
         </div>
         <div className="flex items-center gap-2 mb-2">
-          <button onClick={() => shiftMonth(-1)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-[var(--card)] flex items-center justify-center text-[var(--foreground)] hover:border-[var(--accent)] transition-colors">
+          <button onClick={() => shiftMonth(-1)} aria-label="Previous month" className="w-9 h-9 rounded-lg border border-[var(--border)] bg-[var(--card)] flex items-center justify-center text-[var(--foreground)] hover:border-[var(--accent)] transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M15 19l-7-7 7-7" /></svg>
           </button>
           <button onClick={() => { setView({ y: today.getFullYear(), m: today.getMonth() }); setSelected(null); }} className="px-3 h-9 rounded-lg border border-[var(--border)] bg-[var(--card)] text-xs font-bold text-[var(--foreground)] hover:border-[var(--accent)] transition-colors">TODAY</button>
-          <button onClick={() => shiftMonth(1)} className="w-9 h-9 rounded-lg border border-[var(--border)] bg-[var(--card)] flex items-center justify-center text-[var(--foreground)] hover:border-[var(--accent)] transition-colors">
+          <button onClick={() => shiftMonth(1)} aria-label="Next month" className="w-9 h-9 rounded-lg border border-[var(--border)] bg-[var(--card)] flex items-center justify-center text-[var(--foreground)] hover:border-[var(--accent)] transition-colors">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 5l7 7-7 7" /></svg>
           </button>
         </div>
@@ -960,11 +1142,12 @@ function LeaderboardPage({ leaderboard }: { leaderboard: LeaderboardRow[] }) {
 }
 
 // ─── Profile Page ─────────────────────────────────────────────────────────────
-function ProfilePage({ movies, reviews, vault, members, following, onToggleFollow, session }: {
-  movies: Movie[]; reviews: Review[]; vault: Record<VaultTab, string[]>; members: Profile[]; following: string[]; onToggleFollow: (id: string, username: string) => void; session: Session | null;
+function ProfilePage({ movies, reviews, vault, members, following, onToggleFollow, session, onUploadAvatar }: {
+  movies: Movie[]; reviews: Review[]; vault: Record<VaultTab, string[]>; members: Profile[]; following: string[]; onToggleFollow: (id: string, username: string) => void; session: Session | null; onUploadAvatar: (file: File) => void;
 }) {
   const [tab, setTab] = useState<VaultTab>("watched");
   const [friendQ, setFriendQ] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
 
   const vaultMovies = vault[tab].map((id) => movies.find((m) => m.id === id)).filter((m): m is Movie => Boolean(m));
   const otherMembers = members.filter((m) => m.id !== session?.user.id);
@@ -982,8 +1165,14 @@ function ProfilePage({ movies, reviews, vault, members, following, onToggleFollo
 
       {/* Profile header */}
       <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-8 -mt-8 px-2">
-        <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--primary)] flex items-center justify-center border-4 border-[var(--background)] shadow-xl flex-shrink-0">
-          <span className="font-display font-900 text-2xl text-[var(--accent-foreground)]">{initials(username)}</span>
+        <div className="relative w-20 h-20 flex-shrink-0">
+          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--primary)] flex items-center justify-center border-4 border-[var(--background)] shadow-xl overflow-hidden">
+            {session?.user.avatar_url ? <img src={session.user.avatar_url} alt="" className="w-full h-full object-cover" /> : <span className="font-display font-900 text-2xl text-[var(--accent-foreground)]">{initials(username)}</span>}
+          </div>
+          <button onClick={() => fileRef.current?.click()} aria-label="Change profile photo" className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-[var(--card)] border border-[var(--border)] text-[var(--muted-foreground)] hover:text-[var(--accent)] flex items-center justify-center shadow">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 019.07 4h5.86a2 2 0 011.664.89l.812 1.22A2 2 0 0019.07 7H21a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+          </button>
+          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onUploadAvatar(f); e.currentTarget.value = ""; }} />
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
@@ -1032,7 +1221,7 @@ function ProfilePage({ movies, reviews, vault, members, following, onToggleFollo
             {vaultMovies.map((m) => (
               <div key={m.id} className="group cursor-pointer">
                 <div className="aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] relative">
-                  <img src={m.poster} alt={m.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-400" />
+                  <img src={m.poster} alt={m.title} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.opacity = "0"; }} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-400" />
                   {tab === "favorites" && <div className="absolute top-1.5 right-1.5 text-[var(--star)] text-sm drop-shadow">★</div>}
                 </div>
                 <p className="text-xs font-semibold text-[var(--foreground)] mt-1.5 truncate">{m.title}</p>
@@ -1050,7 +1239,7 @@ function ProfilePage({ movies, reviews, vault, members, following, onToggleFollo
               if (!m) return null;
               return (
                 <div key={r.id} className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 flex gap-3 hover:border-[var(--accent)]/30 transition-colors">
-                  <img src={m.poster} alt={m.title} className="w-12 h-[68px] object-cover rounded-lg flex-shrink-0 bg-[var(--muted)]" />
+                  <img src={m.poster} alt={m.title} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.opacity = "0"; }} className="w-12 h-[68px] object-cover rounded-lg flex-shrink-0 bg-[var(--muted)]" />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <div className="min-w-0">
@@ -1139,10 +1328,16 @@ function ProfilePage({ movies, reviews, vault, members, following, onToggleFollo
 }
 
 // ─── Admin Page ───────────────────────────────────────────────────────────────
-function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAddPoll, onTogglePoll, onDeletePoll, reviews, movies, onDeleteReview }: {
+function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAddPoll, onTogglePoll, onDeletePoll, reviews, movies, threads, onDeleteReview, onAddMovie, onDeleteMovie, onDeleteComment, onUploadPoster, announcements, members, onAddAnnouncement, onDeleteAnnouncement, onSetMemberRole, session }: {
   screenings: Screening[]; onAddScreening: (s: Omit<Screening, "id">) => void; onDeleteScreening: (id: string) => void;
   polls: Poll[]; onAddPoll: (question: string, closes: string, options: string[]) => void; onTogglePoll: (id: string) => void; onDeletePoll: (id: string) => void;
-  reviews: Review[]; movies: Movie[]; onDeleteReview: (id: string) => void;
+  reviews: Review[]; movies: Movie[]; threads: Record<string, Reply[]>; onDeleteReview: (id: string) => void;
+  onAddMovie: (m: { title: string; year: number; genre: string; rating: number; director: string; poster: string }) => void;
+  onDeleteMovie: (id: string) => void; onDeleteComment: (id: string) => void;
+  onUploadPoster: (file: File) => Promise<string>;
+  announcements: Announcement[]; members: Profile[];
+  onAddAnnouncement: (a: { title: string; body: string }) => void; onDeleteAnnouncement: (id: string) => void;
+  onSetMemberRole: (userId: string, role: "member" | "admin") => void; session: Session | null;
 }) {
   // Screening form
   const [sTitle, setSTitle] = useState("");
@@ -1155,24 +1350,67 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
   const [pCloses, setPCloses] = useState("");
   const [pOptions, setPOptions] = useState(["", ""]);
 
+  // Movie form
+  const [mTitle, setMTitle] = useState("");
+  const [mYear, setMYear] = useState("");
+  const [mGenre, setMGenre] = useState("Drama");
+  const [mRating, setMRating] = useState("");
+  const [mDirector, setMDirector] = useState("");
+  const [mPoster, setMPoster] = useState("");
+
+  const [sErrors, setSErrors] = useState<FieldErrors>({});
+  const [pErrors, setPErrors] = useState<FieldErrors>({});
+  const [mErrors, setMErrors] = useState<FieldErrors>({});
+  const [uploading, setUploading] = useState(false);
+  const posterRef = useRef<HTMLInputElement>(null);
+
+  // Announcement form
+  const [aTitle, setATitle] = useState("");
+  const [aBody, setABody] = useState("");
+  const [aErrors, setAErrors] = useState<FieldErrors>({});
+
   const inputCls = "w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors";
 
   const addScreening = () => {
-    if (!sTitle.trim() || !sDate || !sTime.trim()) return;
-    onAddScreening({ title: sTitle.trim(), date: sDate, time: sTime.trim(), location: sLoc.trim() || "Streaming" });
+    const { data, errors } = parseForm(screeningSchema, { title: sTitle, date: sDate, time: sTime, location: sLoc });
+    setSErrors(errors);
+    if (Object.keys(errors).length) return;
+    onAddScreening({ title: data.title, date: data.date, time: data.time, location: data.location || "Streaming" });
     setSTitle(""); setSDate(""); setSTime(""); setSLoc("");
   };
 
   const addPoll = () => {
-    const opts = pOptions.map((o) => o.trim()).filter(Boolean);
-    if (!pQuestion.trim() || opts.length < 2) return;
-    onAddPoll(pQuestion.trim(), pCloses || "TBD", opts);
+    const { data, errors } = parseForm(pollSchema, { question: pQuestion, closes: pCloses, options: pOptions });
+    setPErrors(errors);
+    if (Object.keys(errors).length) return;
+    onAddPoll(data.question, data.closes || "TBD", data.options);
     setPQuestion(""); setPCloses(""); setPOptions(["", ""]);
   };
 
-  const setOpt = (i: number, v: string) => setPOptions((prev) => prev.map((o, idx) => (idx === i ? v : o)));
-  const addOpt = () => setPOptions((prev) => [...prev, ""]);
-  const removeOpt = (i: number) => setPOptions((prev) => prev.filter((_, idx) => idx !== i));
+  const setOpt = (i: number, v: string) => { setPOptions((prev) => prev.map((o, idx) => (idx === i ? v : o))); setPErrors((f) => ({ ...f, options: "" })); };
+  const addOpt = () => { setPOptions((prev) => [...prev, ""]); setPErrors((f) => ({ ...f, options: "" })); };
+  const removeOpt = (i: number) => { setPOptions((prev) => prev.filter((_, idx) => idx !== i)); setPErrors((f) => ({ ...f, options: "" })); };
+
+  const addMovie = () => {
+    const { data, errors } = parseForm(movieSchema, {
+      title: mTitle, year: mYear, genre: mGenre, rating: mRating, director: mDirector, poster: mPoster,
+    });
+    setMErrors(errors);
+    if (Object.keys(errors).length) return;
+    onAddMovie({ title: data.title, year: data.year, genre: data.genre, rating: data.rating, director: data.director, poster: data.poster });
+    setMTitle(""); setMYear(""); setMGenre("Drama"); setMRating(""); setMDirector(""); setMPoster("");
+  };
+
+  const addAnnouncement = () => {
+    const { data, errors } = parseForm(announcementSchema, { title: aTitle, body: aBody });
+    setAErrors(errors);
+    if (Object.keys(errors).length) return;
+    onAddAnnouncement({ title: data.title, body: data.body });
+    setATitle(""); setABody("");
+  };
+
+  const allComments = Object.entries(threads).flatMap(([reviewId, list]) =>
+    list.map((c) => ({ ...c, reviewId })));
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-16">
@@ -1183,10 +1421,19 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5">
           <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">SCREENINGS</h3>
           <div className="flex flex-col gap-2 mb-4">
-            <input value={sTitle} onChange={(e) => setSTitle(e.target.value)} placeholder="Movie title" className={inputCls} />
+            <div>
+              <input value={sTitle} onChange={(e) => { setSTitle(e.target.value); setSErrors((f) => ({ ...f, title: "" })); }} placeholder="Movie title" aria-invalid={!!sErrors.title} className={inputCls} />
+              {sErrors.title && <p className="text-xs text-[var(--accent)] mt-1">{sErrors.title}</p>}
+            </div>
             <div className="grid grid-cols-2 gap-2">
-              <input type="date" value={sDate} onChange={(e) => setSDate(e.target.value)} className={inputCls} />
-              <input value={sTime} onChange={(e) => setSTime(e.target.value)} placeholder="Time (8:00 PM)" className={inputCls} />
+              <div>
+                <input type="date" value={sDate} onChange={(e) => { setSDate(e.target.value); setSErrors((f) => ({ ...f, date: "" })); }} aria-invalid={!!sErrors.date} className={inputCls} />
+                {sErrors.date && <p className="text-xs text-[var(--accent)] mt-1">{sErrors.date}</p>}
+              </div>
+              <div>
+                <input value={sTime} onChange={(e) => { setSTime(e.target.value); setSErrors((f) => ({ ...f, time: "" })); }} placeholder="Time (8:00 PM)" aria-invalid={!!sErrors.time} className={inputCls} />
+                {sErrors.time && <p className="text-xs text-[var(--accent)] mt-1">{sErrors.time}</p>}
+              </div>
             </div>
             <input value={sLoc} onChange={(e) => setSLoc(e.target.value)} placeholder="Location" className={inputCls} />
             <button onClick={addScreening} disabled={!sTitle.trim() || !sDate || !sTime.trim()} className="btn-parallelogram py-2.5 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">ADD SCREENING</button>
@@ -1209,7 +1456,10 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5">
           <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">POLLS</h3>
           <div className="flex flex-col gap-2 mb-4">
-            <input value={pQuestion} onChange={(e) => setPQuestion(e.target.value)} placeholder="Poll question" className={inputCls} />
+            <div>
+              <input value={pQuestion} onChange={(e) => { setPQuestion(e.target.value); setPErrors((f) => ({ ...f, question: "" })); }} placeholder="Poll question" aria-invalid={!!pErrors.question} className={inputCls} />
+              {pErrors.question && <p className="text-xs text-[var(--accent)] mt-1">{pErrors.question}</p>}
+            </div>
             <input type="date" value={pCloses} onChange={(e) => setPCloses(e.target.value)} className={inputCls} />
             {pOptions.map((o, i) => (
               <div key={i} className="flex gap-2">
@@ -1217,6 +1467,7 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
                 {pOptions.length > 2 && <button onClick={() => removeOpt(i)} className="px-2 text-[var(--muted-foreground)] hover:text-[var(--accent)] text-sm">✕</button>}
               </div>
             ))}
+            {pErrors.options && <p className="text-xs text-[var(--accent)]">{pErrors.options}</p>}
             <div className="flex gap-2">
               <button onClick={addOpt} className="px-3 py-1.5 text-xs font-semibold border border-[var(--border)] rounded-lg text-[var(--muted-foreground)] hover:border-[var(--accent)] hover:text-[var(--foreground)] transition-colors">+ Add option</button>
               <button onClick={addPoll} disabled={!pQuestion.trim() || pOptions.map((o) => o.trim()).filter(Boolean).length < 2} className="btn-parallelogram flex-1 py-2.5 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">CREATE POLL</button>
@@ -1257,6 +1508,131 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
           {reviews.length === 0 && <p className="text-sm text-[var(--muted-foreground)] text-center py-4">No reviews.</p>}
         </div>
       </div>
+
+      {/* Movies management */}
+      <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 mt-6">
+        <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">MOVIES</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-4">
+          <div>
+            <input value={mTitle} onChange={(e) => { setMTitle(e.target.value); setMErrors((f) => ({ ...f, title: "" })); }} placeholder="Movie title" aria-invalid={!!mErrors.title} className={inputCls} />
+            {mErrors.title && <p className="text-xs text-[var(--accent)] mt-1">{mErrors.title}</p>}
+          </div>
+          <div>
+            <input value={mYear} onChange={(e) => { setMYear(e.target.value); setMErrors((f) => ({ ...f, year: "" })); }} placeholder="Year (e.g. 2025)" aria-invalid={!!mErrors.year} className={inputCls} />
+            {mErrors.year && <p className="text-xs text-[var(--accent)] mt-1">{mErrors.year}</p>}
+          </div>
+          <div>
+            <select value={mGenre} onChange={(e) => { setMGenre(e.target.value); setMErrors((f) => ({ ...f, genre: "" })); }} aria-invalid={!!mErrors.genre} className={inputCls}>
+              {GENRES.filter((g) => g !== "All").map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+            {mErrors.genre && <p className="text-xs text-[var(--accent)] mt-1">{mErrors.genre}</p>}
+          </div>
+          <div>
+            <input value={mRating} onChange={(e) => { setMRating(e.target.value); setMErrors((f) => ({ ...f, rating: "" })); }} placeholder="Rating (0–10)" aria-invalid={!!mErrors.rating} className={inputCls} />
+            {mErrors.rating && <p className="text-xs text-[var(--accent)] mt-1">{mErrors.rating}</p>}
+          </div>
+          <div>
+            <input value={mDirector} onChange={(e) => setMDirector(e.target.value)} placeholder="Director" className={inputCls} />
+          </div>
+          <div>
+            <div className="flex gap-2">
+              <input value={mPoster} onChange={(e) => setMPoster(e.target.value)} placeholder="Poster URL (optional)" className={inputCls} />
+              <button type="button" onClick={() => posterRef.current?.click()} disabled={uploading} className="px-3 shrink-0 text-xs font-semibold border border-[var(--border)] rounded-lg text-[var(--muted-foreground)] hover:border-[var(--accent)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50">{uploading ? "Uploading…" : "Upload"}</button>
+            </div>
+            <input ref={posterRef} type="file" accept="image/*" className="hidden" onChange={async (e) => {
+              const f = e.target.files?.[0];
+              if (f) {
+                setUploading(true);
+                try { setMPoster(await onUploadPoster(f)); } catch { /* parent toasts */ }
+                finally { setUploading(false); }
+              }
+              e.currentTarget.value = "";
+            }} />
+          </div>
+        </div>
+        <button onClick={addMovie} disabled={!mTitle.trim() || !mYear.trim() || !mRating.trim()} className="btn-parallelogram px-5 py-2.5 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">ADD MOVIE</button>
+        <div className="flex flex-col gap-2 mt-4 max-h-96 overflow-y-auto">
+          {[...movies].sort((a, b) => b.year - a.year).map((m) => (
+            <div key={m.id} className="flex items-center gap-3 border border-[var(--border)] rounded-lg px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-[var(--foreground)] truncate">{m.title} <span className="text-[var(--muted-foreground)] font-normal">· {m.year} · {m.genre} · ★ {m.rating}</span></p>
+                <p className="text-xs text-[var(--muted-foreground)] truncate">{m.director}</p>
+              </div>
+              <button onClick={() => onDeleteMovie(m.id)} className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors">Delete</button>
+            </div>
+          ))}
+          {movies.length === 0 && <p className="text-sm text-[var(--muted-foreground)] text-center py-4">No movies.</p>}
+        </div>
+      </div>
+
+      {/* Comments moderation */}
+      <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 mt-6">
+        <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">COMMENTS</h3>
+        <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
+          {allComments.map((c) => {
+            const review = reviews.find((r) => r.id === c.reviewId);
+            const movie = review && movies.find((m) => m.id === review.movie_id);
+            return (
+              <div key={c.id} className="flex items-start gap-3 border border-[var(--border)] rounded-lg px-3 py-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-[var(--muted-foreground)] truncate">on <span className="text-[var(--foreground)] font-medium">{movie ? movie.title : "Unknown"}</span></p>
+                  <p className="text-sm text-[var(--secondary-foreground)]"><span className="font-semibold text-[var(--foreground)]">{c.username}</span> · {c.body}</p>
+                </div>
+                <button onClick={() => onDeleteComment(c.id)} className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors">Delete</button>
+              </div>
+            );
+          })}
+          {allComments.length === 0 && <p className="text-sm text-[var(--muted-foreground)] text-center py-4">No comments.</p>}
+        </div>
+      </div>
+
+      {/* Announcements */}
+      <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 mt-6">
+        <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">ANNOUNCEMENTS</h3>
+        <div className="flex flex-col gap-2 mb-4">
+          <div>
+            <input value={aTitle} onChange={(e) => { setATitle(e.target.value); setAErrors((f) => ({ ...f, title: "" })); }} placeholder="Announcement title" aria-invalid={!!aErrors.title} className={inputCls} />
+            {aErrors.title && <p className="text-xs text-[var(--accent)] mt-1">{aErrors.title}</p>}
+          </div>
+          <div>
+            <textarea value={aBody} onChange={(e) => { setABody(e.target.value); setAErrors((f) => ({ ...f, body: "" })); }} placeholder="Write the announcement…" rows={2} aria-invalid={!!aErrors.body} className={inputCls} />
+            {aErrors.body && <p className="text-xs text-[var(--accent)] mt-1">{aErrors.body}</p>}
+          </div>
+          <button onClick={addAnnouncement} disabled={!aTitle.trim() || !aBody.trim()} className="btn-parallelogram w-fit px-5 py-2.5 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">POST ANNOUNCEMENT</button>
+        </div>
+        <div className="flex flex-col gap-2">
+          {announcements.map((a) => (
+            <div key={a.id} className="flex items-start gap-3 border border-[var(--border)] rounded-lg px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-[var(--foreground)] truncate">{a.title}</p>
+                <p className="text-xs text-[var(--muted-foreground)]">{a.body}</p>
+              </div>
+              <button onClick={() => onDeleteAnnouncement(a.id)} className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors">Delete</button>
+            </div>
+          ))}
+          {announcements.length === 0 && <p className="text-sm text-[var(--muted-foreground)] text-center py-4">No announcements.</p>}
+        </div>
+      </div>
+
+      {/* Members */}
+      <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 mt-6">
+        <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">MEMBERS</h3>
+        <div className="flex flex-col gap-2">
+          {members.map((m) => {
+            const isSelf = m.id === session?.user.id;
+            return (
+              <div key={m.id} className="flex items-center gap-3 border border-[var(--border)] rounded-lg px-3 py-2">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[var(--foreground)]">{m.username} {isSelf && <span className="text-[var(--muted-foreground)] font-normal">(you)</span>}</p>
+                  <p className="text-xs text-[var(--muted-foreground)] capitalize">{m.role}</p>
+                </div>
+                <button onClick={() => onSetMemberRole(m.id, m.role === "admin" ? "member" : "admin")} disabled={isSelf} className={`text-xs font-semibold transition-colors disabled:opacity-40 ${m.role === "admin" ? "text-[var(--muted-foreground)] hover:text-[var(--foreground)]" : "text-[var(--accent)]"}`}>{m.role === "admin" ? "Remove admin" : "Make admin"}</button>
+              </div>
+            );
+          })}
+          {members.length === 0 && <p className="text-sm text-[var(--muted-foreground)] text-center py-4">No members.</p>}
+        </div>
+      </div>
     </div>
   );
 }
@@ -1291,6 +1667,7 @@ export default function App() {
   const { toasts, push } = useToast();
 
   useInitAuth();
+  useRealtime();
   const session = useSession();
   const auth = useAuth();
   const isAdmin = session?.user.role === "admin";
@@ -1319,6 +1696,13 @@ export default function App() {
   const togglePoll = useTogglePoll();
   const deletePoll = useDeletePoll();
   const deleteReview = useDeleteReview();
+  const addMovie = useAddMovie();
+  const deleteMovie = useDeleteMovie();
+  const deleteComment = useDeleteComment();
+  const announcements = useAnnouncements();
+  const addAnnouncement = useAddAnnouncement();
+  const deleteAnnouncement = useDeleteAnnouncement();
+  const setMemberRole = useSetMemberRole();
 
   const setPageSafe = useCallback((p: Page) => setPage(p), []);
 
@@ -1333,6 +1717,7 @@ export default function App() {
   const followingData = following.data ?? [];
   const userVotesData = userVotes.data ?? {};
   const pollVotesData = pollVotes.data ?? {};
+  const announcementsData = announcements.data ?? [];
 
   const onVote = (id: string, dir: "up" | "down") => {
     voteReview.mutate({ id, dir });
@@ -1386,6 +1771,52 @@ export default function App() {
     deleteReview.mutate(id, { onSuccess: () => push("Review removed") });
   };
 
+  const onAddMovie = (m: { title: string; year: number; genre: string; rating: number; director: string; poster: string }) => {
+    addMovie.mutate(m, { onSuccess: () => push("Movie added") });
+  };
+
+  const onDeleteMovie = (id: string) => {
+    deleteMovie.mutate(id, { onSuccess: () => push("Movie removed") });
+  };
+
+  const onDeleteComment = (id: string) => {
+    deleteComment.mutate(id, { onSuccess: () => push("Comment deleted") });
+  };
+
+  const onUploadAvatar = async (file: File) => {
+    try {
+      const url = await uploadAvatar(file);
+      if (session) setSession({ user: { ...session.user, avatar_url: url } });
+      await updateAvatar(url);
+      push("Profile photo updated");
+    } catch {
+      push("Upload failed", "info");
+    }
+  };
+
+  const onUploadPoster = async (file: File) => {
+    try {
+      const url = await uploadPoster(file);
+      push("Poster uploaded");
+      return url;
+    } catch (e) {
+      push("Upload failed", "info");
+      throw e;
+    }
+  };
+
+  const onAddAnnouncement = (a: { title: string; body: string }) => {
+    addAnnouncement.mutate(a, { onSuccess: () => push("Announcement posted") });
+  };
+
+  const onDeleteAnnouncement = (id: string) => {
+    deleteAnnouncement.mutate(id, { onSuccess: () => push("Announcement removed") });
+  };
+
+  const onSetMemberRole = (userId: string, role: "member" | "admin") => {
+    setMemberRole.mutate({ userId, role }, { onSuccess: () => push("Role updated") });
+  };
+
   return (
     <div className={`${dark ? "" : "light"} min-h-screen bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300`} style={{ fontFamily: "'Outfit', sans-serif" }}>
       {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
@@ -1394,11 +1825,11 @@ export default function App() {
       <NavBar page={page} setPage={setPageSafe} dark={dark} setDark={setDark} session={session} isAdmin={isAdmin} onSignIn={() => setShowSignIn(true)} onSignOut={() => auth.signOut()} />
 
       <main>
-        {page === "home" && <HomePage movies={moviesData} reviews={reviewsData} threads={threadsData} userVotes={userVotesData} onVote={onVote} onReply={onReply} polls={pollsData} pollVotes={pollVotesData} onPollVote={onPollVote} favorites={vaultData.favorites} onToggleFavorite={onToggleFavorite} onWriteReview={onWriteReview} />}
+        {page === "home" && <HomePage movies={moviesData} reviews={reviewsData} threads={threadsData} userVotes={userVotesData} onVote={onVote} onReply={onReply} polls={pollsData} pollVotes={pollVotesData} onPollVote={onPollVote} favorites={vaultData.favorites} onToggleFavorite={onToggleFavorite} onWriteReview={onWriteReview} announcements={announcementsData} />}
         {page === "calendar" && <CalendarPage screenings={screeningsData} push={push} />}
         {page === "leaderboard" && <LeaderboardPage leaderboard={leaderboardData} />}
-        {page === "profile" && <ProfilePage movies={moviesData} reviews={reviewsData} vault={vaultData} members={membersData} following={followingData} onToggleFollow={onToggleFollow} session={session} />}
-        {page === "admin" && (isAdmin ? <AdminPage screenings={screeningsData} onAddScreening={onAddScreening} onDeleteScreening={onDeleteScreening} polls={pollsData} onAddPoll={onAddPoll} onTogglePoll={onTogglePoll} onDeletePoll={onDeletePoll} reviews={reviewsData} movies={moviesData} onDeleteReview={onDeleteReview} /> : (
+        {page === "profile" && <ProfilePage movies={moviesData} reviews={reviewsData} vault={vaultData} members={membersData} following={followingData} onToggleFollow={onToggleFollow} session={session} onUploadAvatar={onUploadAvatar} />}
+        {page === "admin" && (isAdmin ? <AdminPage screenings={screeningsData} onAddScreening={onAddScreening} onDeleteScreening={onDeleteScreening} polls={pollsData} onAddPoll={onAddPoll} onTogglePoll={onTogglePoll} onDeletePoll={onDeletePoll} reviews={reviewsData} movies={moviesData} threads={threadsData} onDeleteReview={onDeleteReview} onAddMovie={onAddMovie} onDeleteMovie={onDeleteMovie} onDeleteComment={onDeleteComment} onUploadPoster={onUploadPoster} announcements={announcementsData} members={membersData} onAddAnnouncement={onAddAnnouncement} onDeleteAnnouncement={onDeleteAnnouncement} onSetMemberRole={onSetMemberRole} session={session} /> : (
           <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-32 pb-16 text-center">
             <p className="font-display font-900 text-4xl text-[var(--muted-foreground)]">ADMIN ONLY</p>
             <p className="text-sm text-[var(--muted-foreground)] mt-2">You need the admin role to see this page.</p>

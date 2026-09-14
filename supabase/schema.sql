@@ -4,6 +4,15 @@
 
 create extension if not exists "pgcrypto";
 
+-- ─── profiles ───────────────────────────────────────────────────────────
+create table if not exists public.profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  username text unique not null,
+  avatar_url text,
+  role text not null default 'member' check (role in ('member', 'admin')),
+  created_at timestamptz not null default now()
+);
+
 -- ─── Helpers ─────────────────────────────────────────────────────────────
 create or replace function public.is_admin()
 returns boolean
@@ -14,15 +23,6 @@ as $$
     where id = auth.uid() and role = 'admin'
   );
 $$;
-
--- ─── profiles ───────────────────────────────────────────────────────────
-create table if not exists public.profiles (
-  id uuid primary key references auth.users(id) on delete cascade,
-  username text unique not null,
-  avatar_url text,
-  role text not null default 'member' check (role in ('member', 'admin')),
-  created_at timestamptz not null default now()
-);
 
 -- ─── movies ─────────────────────────────────────────────────────────────
 create table if not exists public.movies (
@@ -150,7 +150,18 @@ create table if not exists public.notifications (
   user_id uuid not null references public.profiles(id) on delete cascade,
   type text not null,
   body text not null,
+  link text,
   read boolean not null default false,
+  created_at timestamptz not null default now()
+);
+alter table public.notifications add column if not exists link text;
+
+-- ─── announcements ──────────────────────────────────────────────────────
+create table if not exists public.announcements (
+  id uuid primary key default gen_random_uuid(),
+  author_id uuid not null references public.profiles(id) on delete cascade,
+  title text not null,
+  body text not null,
   created_at timestamptz not null default now()
 );
 
@@ -178,6 +189,7 @@ alter table public.library_entries enable row level security;
 alter table public.friendships    enable row level security;
 alter table public.rsvps          enable row level security;
 alter table public.notifications  enable row level security;
+alter table public.announcements enable row level security;
 
 -- profiles: public read, owner write (insert via trigger)
 drop policy if exists "profiles public read" on public.profiles;
@@ -285,6 +297,12 @@ create policy "notifications owner select" on public.notifications for select us
 drop policy if exists "notifications owner update" on public.notifications;
 create policy "notifications owner update" on public.notifications for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+-- announcements: public read, admin write
+drop policy if exists "announcements public read" on public.announcements;
+create policy "announcements public read" on public.announcements for select using (true);
+drop policy if exists "announcements admin write" on public.announcements;
+create policy "announcements admin write" on public.announcements for all using (is_admin()) with check (is_admin());
+
 -- ─── Trigger: profile on signup ─────────────────────────────────────────
 create or replace function public.handle_new_user()
 returns trigger
@@ -308,6 +326,57 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- ─── Trigger: notify on comment reply ───────────────────────────────────
+create or replace function public.notify_on_comment()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  review_author uuid;
+  actor_name text;
+  movie_title text;
+begin
+  select r.author_id, r.title into review_author, movie_title
+    from public.reviews r where r.id = new.review_id;
+  select p.username into actor_name from public.profiles p where p.id = new.author_id;
+  if review_author is not null and review_author <> new.author_id then
+    insert into public.notifications (user_id, type, body, link)
+    values (
+      review_author,
+      'reply',
+      coalesce(actor_name, 'Someone') || ' replied to your review of ' || coalesce(movie_title, 'a movie'),
+      new.review_id
+    );
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_comment_created on public.comments;
+create trigger on_comment_created
+  after insert on public.comments
+  for each row execute function public.notify_on_comment();
+
+-- ─── Trigger: notify on follow ──────────────────────────────────────────
+create or replace function public.notify_on_follow()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare
+  actor_name text;
+begin
+  select p.username into actor_name from public.profiles p where p.id = new.requester_id;
+  insert into public.notifications (user_id, type, body)
+  values (
+    new.addressee_id,
+    'follow',
+    coalesce(actor_name, 'Someone') || ' started following you'
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists on_friendship_created on public.friendships;
+create trigger on_friendship_created
+  after insert on public.friendships
+  for each row execute function public.notify_on_follow();
+
 -- ─── Leaderboard aggregate (Section 9 step 16) ─────────────────────────
 create or replace function public.get_leaderboard()
 returns table (username text, reviews bigint, upvotes bigint)
@@ -323,8 +392,67 @@ as $$
   order by upvotes desc, reviews desc;
 $$;
 
+-- ─── Realtime ───────────────────────────────────────────────────────────
+-- Enable Supabase Realtime for the tables the app subscribes to, and use
+-- REPLICA IDENTITY FULL so UPDATE/DELETE events carry the old row payload.
+alter table public.review_votes replica identity full;
+alter table public.comments replica identity full;
+alter table public.poll_votes replica identity full;
+alter table public.notifications replica identity full;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.review_votes;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table public.comments;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table public.poll_votes;
+exception when duplicate_object then null;
+end $$;
+do $$
+begin
+  alter publication supabase_realtime add table public.notifications;
+exception when duplicate_object then null;
+end $$;
+
+-- ─── Storage buckets ────────────────────────────────────────────────────
+-- Create the poster/avatar buckets (public so their URLs need no signed token).
+insert into storage.buckets (id, name, public)
+values ('posters', 'posters', true)
+on conflict (id) do nothing;
+
+insert into storage.buckets (id, name, public)
+values ('avatars', 'avatars', true)
+on conflict (id) do nothing;
+
+-- posters: public read, admin write
+drop policy if exists "posters public read" on storage.objects;
+create policy "posters public read" on storage.objects for select using (bucket_id = 'posters');
+drop policy if exists "posters admin insert" on storage.objects;
+create policy "posters admin insert" on storage.objects for insert
+  with check (bucket_id = 'posters' and public.is_admin());
+
+-- avatars: public read, owner write (object path is {user_id}/{file})
+drop policy if exists "avatars public read" on storage.objects;
+create policy "avatars public read" on storage.objects for select using (bucket_id = 'avatars');
+drop policy if exists "avatars owner insert" on storage.objects;
+create policy "avatars owner insert" on storage.objects for insert
+  with check (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+drop policy if exists "avatars owner update" on storage.objects;
+create policy "avatars owner update" on storage.objects for update
+  using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+drop policy if exists "avatars owner delete" on storage.objects;
+create policy "avatars owner delete" on storage.objects for delete
+  using (bucket_id = 'avatars' and auth.uid()::text = (storage.foldername(name))[1]);
+
 -- ─── Grants ─────────────────────────────────────────────────────────────
-grant usage on schema public to anon, authenticated;
-grant select, insert, update, delete on all tables in schema public to anon, authenticated;
-grant execute on function public.is_admin() to anon, authenticated;
-grant execute on function public.get_leaderboard() to anon, authenticated;
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role;
+grant execute on function public.is_admin() to anon, authenticated, service_role;
+grant execute on function public.get_leaderboard() to anon, authenticated, service_role;

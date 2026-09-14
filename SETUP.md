@@ -21,7 +21,7 @@ This guide covers turning on live mode and deploying to Vercel. Steps marked **Y
 2. Open `supabase/schema.sql` in this repo.
 3. Copy the entire file and paste it into the SQL Editor, then **Run**.
 
-This creates all tables, Row-Level Security policies, the `is_admin()` helper, the `handle_new_user()` trigger, and the `get_leaderboard()` RPC.
+This creates all tables, Row-Level Security policies, the `is_admin()` helper, the `handle_new_user()` trigger, the `get_leaderboard()` RPC, the `announcements` table, the notification triggers (`notify_on_comment`, `notify_on_follow`), the Realtime publication for live updates, and the `posters`/`avatars` Storage buckets with their policies.
 
 > If you ever change the schema, re-run the file. It uses `create table if not exists` / `create or replace`, so it's safe to re-run.
 
@@ -50,7 +50,7 @@ This creates all tables, Row-Level Security policies, the `is_admin()` helper, t
    ```bash
    SUPABASE_URL=https://your-project-ref.supabase.co \
    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key \
-   pnpm seed
+   npm run seed
    ```
 
    On Windows PowerShell, use `$env:` instead:
@@ -58,7 +58,7 @@ This creates all tables, Row-Level Security policies, the `is_admin()` helper, t
    ```powershell
    $env:SUPABASE_URL="https://your-project-ref.supabase.co"
    $env:SUPABASE_SERVICE_ROLE_KEY="your-service-role-key"
-   pnpm seed
+   npm run seed
    ```
 
 This creates 32 movies, 10 demo users, 6 reviews, comments, 3 polls, 5 screenings, and the demo user's vault.
@@ -69,13 +69,16 @@ This creates 32 movies, 10 demo users, 6 reviews, comments, 3 polls, 5 screening
 ## 5. Invite members & promote admins — YOU
 
 - New members sign up through the app's **Sign in → Create an account** flow (email + password, or Google once you configure a Google provider in **Authentication → Providers**).
-- To make someone an admin, open **Authentication → Users**, find their row, and set `role` in the `raw_user_meta_data` / `user_metadata` to `admin` — or run this in the SQL Editor:
+- **Promote/demote admins in-app:** the **Admin → Members** panel lists every member with a **Make admin / Remove admin** toggle. No SQL needed.
+- To make someone an admin *before* they exist (or in bulk), open **Authentication → Users** and set `role` in metadata — or run this in the SQL Editor:
 
   ```sql
   update public.profiles set role = 'admin' where username = 'their-username';
   ```
 
-  The `handle_new_user()` trigger copies `role` from auth metadata into `profiles` on signup, so metadata set *before* their first signup also works.
+  The `handle_new_user()` trigger copies `role` from auth metadata into `profiles` on signup.
+
+- To invite people by email directly (no self-serve signup), use **Authentication → Users → Invite user** in the dashboard — invites are sent from the Supabase project and can't be triggered from the browser client.
 
 ## 6. Deploy to Vercel — YOU
 
@@ -102,8 +105,8 @@ This creates 32 movies, 10 demo users, 6 reviews, comments, 3 polls, 5 screening
 ## Local dev cheat sheet
 
 ```bash
-pnpm dev          # start dev server (mock mode until .env is filled)
-pnpm build        # production build (types are stripped; use tsc for a real check)
-pnpm exec tsc --noEmit   # full type check
-pnpm seed         # seed the configured Supabase project (service role)
+npm run dev               # start dev server (mock mode until .env is filled)
+npm run build             # production build (types are stripped; use tsc for a real check)
+npx tsc --noEmit          # full type check
+npm run seed              # seed the configured Supabase project (service role)
 ```

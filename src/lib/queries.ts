@@ -1,14 +1,15 @@
-// React Query hooks. One hook per data domain; mutations invalidate the
-// queries they touch so the UI stays in sync (optimistic via refetch).
+// React Query hooks. One hook per data domain. Mutations write the optimistic
+// value to the cache first (so votes/bars update instantly), then reconcile by
+// invalidating on settle. On error the optimistic value is rolled back.
 
 import { useEffect } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { isSupabaseConfigured, requireSupabase } from "./supabase";
 import { MOCK_USER } from "./mock";
-import { setSession, useSession } from "./session";
+import { getSession, setSession, useSession } from "./session";
 import { fetchProfile } from "./api";
 import * as api from "./api";
-import type { VaultTab } from "./types";
+import type { Vault, VaultTab, Reply, Review, Notification, Movie, Announcement, Profile } from "./types";
 
 export { useSession };
 
@@ -116,87 +117,238 @@ export function useMyPollVotes() {
   return useQuery({ queryKey: ["myPollVotes", uid], queryFn: () => api.getMyPollVotes(uid), enabled: !!uid });
 }
 
+export function useNotifications() {
+  const session = useSession();
+  const uid = session?.user.id ?? "";
+  return useQuery({ queryKey: ["notifications", uid], queryFn: () => api.listNotifications(), enabled: !!uid });
+}
+
+export function useAnnouncements() {
+  return useQuery({ queryKey: ["announcements"], queryFn: api.listAnnouncements });
+}
+
 // ─── Mutations ────────────────────────────────────────────────────────────────
-function useInvalidatingMutation<TArgs, TResult>(
+type Rollback = () => void;
+
+/** Optimistically overwrite a cache value; returns a rollback restoring the old one. */
+function patch<T>(qc: QueryClient, key: unknown[], updater: (old: T) => T): Rollback {
+  const old = qc.getQueryData<T>(key);
+  if (old === undefined) return () => {};
+  qc.setQueryData<T>(key, updater(old));
+  return () => qc.setQueryData(key, old);
+}
+
+function useOptimisticMutation<TArgs, TResult>(
   fn: (args: TArgs) => Promise<TResult>,
   keys: string[][],
+  optimistic?: (args: TArgs, qc: QueryClient) => Rollback | void,
 ) {
   const qc = useQueryClient();
-  return useMutation({
+  return useMutation<TResult, Error, TArgs, Rollback | void>({
     mutationFn: fn,
-    onSuccess: () => keys.forEach((k) => qc.invalidateQueries({ queryKey: k })),
+    onMutate: async (args) => {
+      if (!optimistic) return;
+      await Promise.all(keys.map((k) => qc.cancelQueries({ queryKey: k })));
+      return optimistic(args, qc);
+    },
+    onError: (_err, _args, ctx) => {
+      if (ctx) ctx();
+    },
+    onSettled: () => keys.forEach((k) => qc.invalidateQueries({ queryKey: k })),
   });
 }
 
 export function useCreateReview() {
-  return useInvalidatingMutation(api.createReview, [["reviews"], ["leaderboard"]]);
+  return useOptimisticMutation(api.createReview, [["reviews"], ["leaderboard"]], (input, qc) => {
+    const uid = getSession()?.user.id ?? "";
+    const username = getSession()?.user.username ?? "You";
+    return patch<Review[]>(qc, ["reviews"], (old) => {
+      const review: Review = {
+        id: `tmp-${Date.now()}`, movie_id: input.movie_id, author_id: uid,
+        username, rating: input.rating, body: input.body,
+        upvotes: 0, downvotes: 0, created_at: new Date().toISOString(),
+      };
+      return [review, ...old];
+    });
+  });
 }
 
 export function useVoteReview() {
-  return useInvalidatingMutation(
+  return useOptimisticMutation(
     (args: { id: string; dir: "up" | "down" }) => api.voteReview(args.id, args.dir),
     [["reviews"], ["myReviewVotes"], ["leaderboard"]],
+    (args, qc) => {
+      const uid = getSession()?.user.id ?? "";
+      // Base review tallies exclude the current user's vote; the UI layers it on
+      // from this map, so only `myReviewVotes` needs the optimistic write.
+      return patch<Record<string, "up" | "down" | null>>(qc, ["myReviewVotes", uid], (old) => {
+        const cur = old[args.id] ?? null;
+        const next = cur === args.dir ? null : args.dir;
+        return { ...old, [args.id]: next };
+      });
+    },
   );
 }
 
 export function useAddReply() {
-  return useInvalidatingMutation(
+  return useOptimisticMutation(
     (args: { reviewId: string; body: string }) => api.addReply(args.reviewId, args.body),
     [["threads"]],
+    (args, qc) => {
+      const username = getSession()?.user.username ?? "You";
+      return patch<Record<string, Reply[]>>(qc, ["threads"], (old) => {
+        const list = old[args.reviewId] ?? [];
+        const reply: Reply = {
+          id: `tmp-${Date.now()}`, review_id: args.reviewId, username, body: args.body, created_at: new Date().toISOString(),
+        };
+        return { ...old, [args.reviewId]: [...list, reply] };
+      });
+    },
   );
 }
 
 export function useCastPollVote() {
-  return useInvalidatingMutation(
+  return useOptimisticMutation(
     (args: { pollId: string; optionIndex: number }) => api.castPollVote(args.pollId, args.optionIndex),
     [["polls"], ["myPollVotes"]],
+    (args, qc) => {
+      const uid = getSession()?.user.id ?? "";
+      return patch<Record<string, number>>(qc, ["myPollVotes", uid], (old) => {
+        if (old[args.pollId] != null) return old;
+        return { ...old, [args.pollId]: args.optionIndex };
+      });
+    },
   );
 }
 
 export function useToggleFavorite() {
-  return useInvalidatingMutation((id: string) => api.toggleFavorite(id), [["vault"]]);
+  return useOptimisticMutation((id: string) => api.toggleFavorite(id), [["vault"]], (movieId, qc) => {
+    const uid = getSession()?.user.id ?? "";
+    return patch<Vault>(qc, ["vault", uid], (old) => {
+      const has = old.favorites.includes(movieId);
+      return { ...old, favorites: has ? old.favorites.filter((x) => x !== movieId) : [...old.favorites, movieId] };
+    });
+  });
 }
 
 export function useSetVaultStatus() {
-  return useInvalidatingMutation(
+  return useOptimisticMutation(
     (args: { movieId: string; status: VaultTab }) => api.setVaultStatus(args.movieId, args.status),
     [["vault"]],
+    (args, qc) => {
+      const uid = getSession()?.user.id ?? "";
+      return patch<Vault>(qc, ["vault", uid], (old) => {
+        const has = old[args.status].includes(args.movieId);
+        return { ...old, [args.status]: has ? old[args.status].filter((x) => x !== args.movieId) : [...old[args.status], args.movieId] };
+      });
+    },
   );
 }
 
 export function useToggleFollow() {
-  return useInvalidatingMutation((id: string) => api.toggleFollow(id), [["following"]]);
+  return useOptimisticMutation((id: string) => api.toggleFollow(id), [["following"]], (targetId, qc) => {
+    const uid = getSession()?.user.id ?? "";
+    return patch<string[]>(qc, ["following", uid], (old) =>
+      old.includes(targetId) ? old.filter((x) => x !== targetId) : [...old, targetId]);
+  });
 }
 
 export function useAddScreening() {
-  return useInvalidatingMutation(
+  return useOptimisticMutation(
     (args: Omit<import("./types").Screening, "id">) => api.addScreening(args),
     [["screenings"]],
   );
 }
 
 export function useDeleteScreening() {
-  return useInvalidatingMutation((id: string) => api.deleteScreening(id), [["screenings"]]);
+  return useOptimisticMutation((id: string) => api.deleteScreening(id), [["screenings"]]);
 }
 
 export function useAddPoll() {
-  return useInvalidatingMutation(
+  return useOptimisticMutation(
     (args: { question: string; closes: string; options: string[] }) => api.addPoll(args),
     [["polls"]],
   );
 }
 
 export function useTogglePoll() {
-  return useInvalidatingMutation((id: string) => api.togglePoll(id), [["polls"]]);
+  return useOptimisticMutation((id: string) => api.togglePoll(id), [["polls"]]);
 }
 
 export function useDeletePoll() {
-  return useInvalidatingMutation((id: string) => api.deletePoll(id), [["polls"]]);
+  return useOptimisticMutation((id: string) => api.deletePoll(id), [["polls"]]);
 }
 
 export function useDeleteReview() {
-  return useInvalidatingMutation(
+  return useOptimisticMutation(
     (id: string) => api.deleteReview(id),
     [["reviews"], ["threads"], ["leaderboard"]],
+  );
+}
+
+export function useMarkNotificationsRead() {
+  return useOptimisticMutation(
+    () => api.markNotificationsRead(),
+    [["notifications"]],
+    (_args, qc) => {
+      const uid = getSession()?.user.id ?? "";
+      return patch<Notification[]>(qc, ["notifications", uid], (old) =>
+        old.map((n) => (n.read ? n : { ...n, read: true })));
+    },
+  );
+}
+
+export function useAddMovie() {
+  return useOptimisticMutation(
+    (args: { title: string; year: number; genre: string; rating: number; director: string; poster: string }) => api.addMovie(args),
+    [["movies"]],
+    (args, qc) => patch<Movie[]>(qc, ["movies"], (old) => [{ id: `tmp-${Date.now()}`, ...args }, ...old]),
+  );
+}
+
+export function useDeleteMovie() {
+  return useOptimisticMutation(
+    (id: string) => api.deleteMovie(id),
+    [["movies"], ["vault"], ["reviews"], ["leaderboard"]],
+    (id, qc) => patch<Movie[]>(qc, ["movies"], (old) => old.filter((m) => m.id !== id)),
+  );
+}
+
+export function useDeleteComment() {
+  return useOptimisticMutation(
+    (id: string) => api.deleteComment(id),
+    [["threads"]],
+    (id, qc) => patch<Record<string, Reply[]>>(qc, ["threads"], (old) => {
+      const next: Record<string, Reply[]> = {};
+      for (const k of Object.keys(old)) next[k] = old[k].filter((c) => c.id !== id);
+      return next;
+    }),
+  );
+}
+
+export function useAddAnnouncement() {
+  return useOptimisticMutation(
+    (args: { title: string; body: string }) => api.addAnnouncement(args),
+    [["announcements"]],
+    (args, qc) => {
+      const username = getSession()?.user.username ?? "You";
+      return patch<Announcement[]>(qc, ["announcements"], (old) => [
+        { id: `tmp-${Date.now()}`, title: args.title, body: args.body, author: username, created_at: new Date().toISOString() },
+        ...old,
+      ]);
+    },
+  );
+}
+
+export function useDeleteAnnouncement() {
+  return useOptimisticMutation((id: string) => api.deleteAnnouncement(id), [["announcements"]]);
+}
+
+export function useSetMemberRole() {
+  return useOptimisticMutation(
+    (args: { userId: string; role: "member" | "admin" }) => api.setMemberRole(args.userId, args.role),
+    [["members"]],
+    (args, qc) => patch<Profile[]>(qc, ["members"], (old) =>
+      old.map((m) => (m.id === args.userId ? { ...m, role: args.role } : m))),
   );
 }

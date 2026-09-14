@@ -7,6 +7,7 @@ export interface Profile {
   id: string;
   username: string;
   role: Role;
+  avatar_url?: string | null;
 }
 
 export interface Session {
@@ -73,4 +74,21 @@ export interface LeaderboardRow {
   username: string;
   reviews: number;
   upvotes: number;
+}
+
+export interface Notification {
+  id: string;
+  type: string;
+  body: string;
+  link?: string | null;
+  read: boolean;
+  created_at: string;
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  body: string;
+  author: string;
+  created_at: string;
 }
