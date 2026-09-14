@@ -381,48 +381,30 @@ Ordered roadmap to take the front-end prototype to a complete, deployed app runn
 
 ### 9.0 Status (updated 2026-09-14)
 
-**Stack deviation.** The app stayed on **React 19 + Vite 8 + Tailwind CSS v4** instead of migrating to Next.js. Supabase is wired **client-side** through `@supabase/supabase-js`, with `@tanstack/react-query` for server state. `CLAUDE.md` pins this repo to Vite, so the Next.js instructions in Section 2 and the old 9.1 do not apply to this repo.
+**Stack.** React 19 + Vite 8 + Tailwind CSS v4. Supabase wired client-side through `@supabase/supabase-js`, `@tanstack/react-query` for server state. No Next.js — `CLAUDE.md` pins this repo to Vite.
 
-**Done (code).**
-- `supabase/schema.sql` — full schema, RLS, `is_admin()`, `handle_new_user()` trigger, `get_leaderboard()` RPC.
-- `scripts/seed.mjs` — service-role seed: 32 movies, 10 demo users, reviews, comments, polls, screenings, vault. Demo login `cinemavault@example.com` / `password123`.
-- `src/lib/` — `supabase.ts` (client + config gate), `api.ts` (Supabase ↔ mock facade), `queries.ts` (React Query hooks), `session.ts` (reactive store), `types.ts`, `format.ts`, `mock.ts` (localStorage fallback).
-- `src/App.tsx` — rewired to consume the hooks. Hardcoded `MOVIES`/`REVIEWS`/`REPLY_THREADS`/`POLLS`/`LEADERBOARD` arrays removed; numeric ids replaced with string ids; auth and admin gating wired.
-- `.env.example`, `SETUP.md` (manual run book).
-- `pnpm exec tsc --noEmit` clean; `pnpm build` passes.
+**Live & deployed.** Production Supabase project created, `schema.sql` run, and seeded (1186 movies, demo users, reviews, polls, screenings). Vercel deploy: `https://absolutecinema-rust.vercel.app`. The `src/lib/` facade falls back to a `localStorage` mock when `.env` is absent.
 
-**Done (behavior).**
-- Auth: email/password + Google sign-in/sign-up/sign-out; sign-in modal and navbar reflect the real session; admin pages gated by `profiles.role`.
-- Reviews, polls, vault, following, screenings, and leaderboard read/write through the facade — live when `.env` is set, mock otherwise.
+**Done.**
+- Auth: email/password (sign-up restricted to `@tsinglan.org`) + Google; session-driven navbar and sign-in modal.
+- Admin console gated by a club code (not role): correct code unlocks the console and promotes the signed-in user to `admin` so admin writes pass RLS.
+- Featured reviews: admins toggle any review as featured; the landing hero carousel shows only featured reviews (falls back to the newest 3 when none are featured).
+- Edit profile: change username + upload avatar.
+- Realtime: `postgres_changes` subscriptions invalidate review-vote / comment / poll-vote caches live.
+- Validation: zod schemas in `src/lib/validation.ts`.
+- Notifications: `notifications` table + triggers + UI.
+- Storage: poster and avatar uploads to Supabase Storage.
+- Reviews, polls, vault, following, screenings, and leaderboard read/write through the facade — live, mock otherwise.
 
-**Manual (user — see `SETUP.md`).**
-- Create the Supabase project, run `schema.sql`, add `.env`, run `pnpm seed`.
-- Invite members and promote admins.
-- Deploy to Vercel.
-
-**Not yet done (remaining code).**
-- Realtime subscriptions (votes / comments / poll bars) — currently refetch + invalidate.
-- React Hook Form + Zod validation — `zod` is installed but unused.
-- TMDb integration — 32 seeded movies only.
-- `notifications` table + UI.
+**Not yet done.**
+- TMDb integration — the catalog is a static seed (1186 movies); no live TMDb import.
 - Accessibility pass.
-- Supabase Storage for posters/avatars — initials used instead.
 
-### 9.1 Next code steps (ordered)
+### 9.1 Remaining code (ordered)
 
-1. Realtime: add Supabase `postgres_changes` subscriptions for `review_votes`, `comments`, and `poll_votes`; update caches instead of refetching.
-2. Forms: wrap Write Review and Poll creation in `react-hook-form` + `zod` schemas.
-3. TMDb: add a movie catalog import (TMDb key) or keep the seed list — decide before launch.
-4. Notifications: add a `notifications` table + trigger, and surface replies and friend requests.
-5. Accessibility: keyboard navigation, ARIA labels, focus states; confirm responsiveness.
-6. Storage: poster and avatar uploads via Supabase Storage.
+1. TMDb: add a movie catalog import (TMDb key), or keep the seed list — decide before launch.
+2. Accessibility: keyboard navigation, ARIA labels, focus states; confirm responsiveness.
 
-### 9.2 Deploy + go-live (manual)
+### 9.2 Deploy + go-live (done)
 
-7. Deploy to Vercel and point it at the production Supabase instance.
-8. Seed the production project, invite members, and switch admin accounts to the `admin` role.
-
-### 9.7 NEW FEATURES / ADJUSTMENTS
-
-- **Admin tab — done.** Shows when the profile has the `admin` role. Admin can host polls, close/reopen polls, add and delete screenings (calendar), and delete reviews.
-- **Still open for admin:** announcements, account management, delete movie comments, add movies to the library, delete movies from the library.
+Supabase project created, `schema.sql` run, `.env` set, seed run, Vercel deployed. Remaining manual work is only inviting members.

@@ -47,6 +47,7 @@ create table if not exists public.reviews (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+alter table public.reviews add column if not exists featured boolean not null default false;
 
 -- ─── review_votes ───────────────────────────────────────────────────────
 create table if not exists public.review_votes (
@@ -214,6 +215,8 @@ drop policy if exists "reviews owner update" on public.reviews;
 create policy "reviews owner update" on public.reviews for update using (auth.uid() = author_id) with check (auth.uid() = author_id);
 drop policy if exists "reviews owner delete" on public.reviews;
 create policy "reviews owner delete" on public.reviews for delete using (auth.uid() = author_id or is_admin());
+drop policy if exists "reviews admin update" on public.reviews;
+create policy "reviews admin update" on public.reviews for update using (is_admin()) with check (is_admin());
 
 -- review_votes: public read, owner write
 drop policy if exists "review_votes public read" on public.review_votes;
@@ -302,6 +305,25 @@ drop policy if exists "announcements public read" on public.announcements;
 create policy "announcements public read" on public.announcements for select using (true);
 drop policy if exists "announcements admin write" on public.announcements;
 create policy "announcements admin write" on public.announcements for all using (is_admin()) with check (is_admin());
+
+-- ─── Trigger: restrict signups to @tsinglan.org ─────────────────────────
+-- Enforced server-side so the client check in lib/api.ts can't be bypassed
+-- with a direct API call. Email confirmation must be ON (Auth → Email →
+-- "Confirm email") for the verification email to send on sign-up.
+create or replace function public.enforce_tsinglan_domain()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if new.email is null or lower(new.email) not like '%@tsinglan.org' then
+    raise exception 'Sign up is restricted to @tsinglan.org email addresses';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_domain_check on auth.users;
+create trigger on_auth_user_domain_check
+  before insert on auth.users
+  for each row execute function public.enforce_tsinglan_domain();
 
 -- ─── Trigger: profile on signup ─────────────────────────────────────────
 create or replace function public.handle_new_user()

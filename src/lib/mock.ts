@@ -1207,12 +1207,12 @@ export const YEARS = ["All", "2024", "2023", "2022", "2010s", "2000s", "Pre-2000
 export const RATINGS = ["All", "9+", "8+", "7+"];
 
 export const REVIEWS: Review[] = [
-  { id: "r1", movie_id: "33", author_id: "u1", username: "CinemaVault",     rating: 9,  upvotes: 142, downvotes: 8,  created_at: daysAgo(2),  body: "Pixar back in peak form. Anxiety as the villain is the most honest depiction of growing up since Toy Story. The panic-attack sequence is unforgettable." },
-  { id: "r2", movie_id: "2", author_id: "u2", username: "FilmNoir88",       rating: 9,  upvotes: 98,  downvotes: 4,  created_at: daysAgo(4),  body: "A quiet devastation. Past Lives understands longing better than almost any film in recent memory. Greta Lee is a force of nature." },
-  { id: "r3", movie_id: "3", author_id: "u3", username: "ReelTalk",         rating: 8,  upvotes: 211, downvotes: 31, created_at: daysAgo(7),  body: "Villeneuve delivers a visually staggering epic. The sandworm sequences are the most awe-inspiring spectacle in years. Zendaya earns every second." },
-  { id: "r4", movie_id: "37", author_id: "u4", username: "SunsetBoulevard",  rating: 10, upvotes: 187, downvotes: 6,  created_at: daysAgo(7),  body: "The most visually audacious animated film ever made. Every frame is a painting — Gwen's opening sequence alone is worth the price of admission." },
-  { id: "r5", movie_id: "46", author_id: "u5", username: "NewWaveNick",      rating: 8,  upvotes: 76,  downvotes: 19, created_at: daysAgo(14), body: "A grim, rain-soaked detective story that finally treats Batman like a noir protagonist. Pattinson and Kravitz crackle in every scene." },
-  { id: "r6", movie_id: "28", author_id: "u6", username: "OscarBait",        rating: 9,  upvotes: 130, downvotes: 11, created_at: daysAgo(21), body: "Pure blockbuster adrenaline with a beating heart. The final-act flight sequences are the best aerial action committed to film in years." },
+  { id: "r1", movie_id: "33", author_id: "u1", username: "CinemaVault",     rating: 9,  upvotes: 142, downvotes: 8,  created_at: daysAgo(2),  body: "Pixar back in peak form. Anxiety as the villain is the most honest depiction of growing up since Toy Story. The panic-attack sequence is unforgettable.", featured: true },
+  { id: "r2", movie_id: "2", author_id: "u2", username: "FilmNoir88",       rating: 9,  upvotes: 98,  downvotes: 4,  created_at: daysAgo(4),  body: "A quiet devastation. Past Lives understands longing better than almost any film in recent memory. Greta Lee is a force of nature.", featured: false },
+  { id: "r3", movie_id: "3", author_id: "u3", username: "ReelTalk",         rating: 8,  upvotes: 211, downvotes: 31, created_at: daysAgo(7),  body: "Villeneuve delivers a visually staggering epic. The sandworm sequences are the most awe-inspiring spectacle in years. Zendaya earns every second.", featured: false },
+  { id: "r4", movie_id: "37", author_id: "u4", username: "SunsetBoulevard",  rating: 10, upvotes: 187, downvotes: 6,  created_at: daysAgo(7),  body: "The most visually audacious animated film ever made. Every frame is a painting — Gwen's opening sequence alone is worth the price of admission.", featured: true },
+  { id: "r5", movie_id: "46", author_id: "u5", username: "NewWaveNick",      rating: 8,  upvotes: 76,  downvotes: 19, created_at: daysAgo(14), body: "A grim, rain-soaked detective story that finally treats Batman like a noir protagonist. Pattinson and Kravitz crackle in every scene.", featured: false },
+  { id: "r6", movie_id: "28", author_id: "u6", username: "OscarBait",        rating: 9,  upvotes: 130, downvotes: 11, created_at: daysAgo(21), body: "Pure blockbuster adrenaline with a beating heart. The final-act flight sequences are the best aerial action committed to film in years.", featured: true },
 ];
 
 export const REPLY_THREADS: Record<string, Reply[]> = {
@@ -1425,6 +1425,7 @@ export function mockCreateReview(input: { movie_id: string; rating: number; body
     upvotes: 0,
     downvotes: 0,
     created_at: new Date().toISOString(),
+    featured: false,
   };
   save(KEYS.reviews, [review, ...reviews]);
   return review;
@@ -1524,4 +1525,13 @@ export function mockDeleteAnnouncement(id: string) {
 
 export function mockSetMemberRole(userId: string, role: "member" | "admin") {
   save(KEYS.members, mockMembers().map((m) => (m.id === userId ? { ...m, role } : m)));
+}
+
+export function mockSetReviewFeatured(reviewId: string, featured: boolean) {
+  save(KEYS.reviews, mockReviews().map((r) => (r.id === reviewId ? { ...r, featured } : r)));
+}
+
+export function mockUpdateUsername(username: string) {
+  const m = mockMembers().map((x) => (x.id === MOCK_USER.id ? { ...x, username } : x));
+  save(KEYS.members, m);
 }

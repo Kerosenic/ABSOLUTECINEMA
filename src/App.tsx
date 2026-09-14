@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import type { Movie, Review, Reply, Poll, Screening, VaultTab, LeaderboardRow, Profile, Session, Announcement } from "./lib/types";
 import { initials, timeAgo, badgeFor, fmtCloses, fmtDate, MONTH_NAMES } from "./lib/format";
-import { isSupabaseConfigured } from "./lib/supabase";
 import { reviewSchema, pollSchema, screeningSchema, movieSchema, announcementSchema, signInSchema, signUpSchema, parseForm, type FieldErrors } from "./lib/validation";
 import { GENRES, YEARS, RATINGS, TRENDING_IDS } from "./lib/mock";
 import {
@@ -13,6 +12,7 @@ import {
   useDeletePoll, useDeleteReview, useNotifications, useMarkNotificationsRead,
   useAddMovie, useDeleteMovie, useDeleteComment,
   useAnnouncements, useAddAnnouncement, useDeleteAnnouncement, useSetMemberRole,
+  useSetReviewFeatured, useUpdateUsername,
 } from "./lib/queries";
 import { useRealtime } from "./lib/realtime";
 import { setSession } from "./lib/session";
@@ -21,6 +21,9 @@ import logoUrl from "../logo.png";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Page = "home" | "calendar" | "leaderboard" | "profile" | "admin";
+
+// Club code that unlocks the admin console. Client-side gate; see AdminGate.
+const ADMIN_CODE = "AMENICETULOSBA";
 
 // ─── Persistent state ─────────────────────────────────────────────────────────
 function usePersistentState<T>(key: string, makeInitial: () => T) {
@@ -229,6 +232,9 @@ function SignInModal({ onClose }: { onClose: () => void }) {
           <div>
             <input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setFieldErrors((f) => ({ ...f, email: "" })); }} placeholder="Email address" aria-invalid={!!fieldErrors.email} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
             {fieldErrors.email && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.email}</p>}
+            {mode === "signup" && !fieldErrors.email && (
+              <p className="text-xs text-[var(--muted-foreground)] mt-1">Use a @tsinglan.org email</p>
+            )}
           </div>
           <div>
             <input type="password" value={pass} onChange={(e) => { setPass(e.target.value); setFieldErrors((f) => ({ ...f, password: "" })); }} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Password" aria-invalid={!!fieldErrors.password} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
@@ -241,12 +247,6 @@ function SignInModal({ onClose }: { onClose: () => void }) {
         <button onClick={submit} disabled={busy || !email || !pass} className="btn-parallelogram w-full py-3 bg-[var(--accent)] text-black font-bold hover:opacity-90 transition-opacity text-sm tracking-wide disabled:opacity-40">
           {busy ? "PLEASE WAIT…" : mode === "signin" ? "SIGN IN" : "CREATE ACCOUNT"}
         </button>
-
-        {isSupabaseConfigured && (
-          <button onClick={() => auth.signInGoogle()} className="w-full py-2.5 mt-3 border border-[var(--border)] rounded-lg text-sm font-semibold text-[var(--foreground)] hover:border-[var(--accent)] transition-colors">
-            Continue with Google
-          </button>
-        )}
 
         <p className="text-xs text-center text-[var(--muted-foreground)] mt-4">
           {mode === "signin" ? "New here?" : "Already a member?"}{" "}
@@ -326,9 +326,9 @@ function NotificationBell({ onNavigate }: { onNavigate: (link?: string | null) =
 }
 
 // ─── Navbar ───────────────────────────────────────────────────────────────────
-function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSignOut }: {
+function NavBar({ page, setPage, dark, setDark, session, onSignIn, onSignOut }: {
   page: Page; setPage: (p: Page) => void; dark: boolean; setDark: (v: boolean) => void;
-  session: Session | null; isAdmin: boolean; onSignIn: () => void; onSignOut: () => void;
+  session: Session | null; onSignIn: () => void; onSignOut: () => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -368,7 +368,7 @@ function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSi
     { label: "Movies",      id: "library" },
     { label: "Calendar",    id: "calendar" },
     { label: "Leaderboard", id: "leaderboard" },
-    ...(isAdmin ? [{ label: "Admin", id: "admin" }] : []),
+    { label: "Admin",       id: "admin" },
   ];
 
   const isActive = (id: string) => {
@@ -458,7 +458,8 @@ function NavBar({ page, setPage, dark, setDark, session, isAdmin, onSignIn, onSi
 // ─── Hero Banner ──────────────────────────────────────────────────────────────
 function HeroBanner({ movies, reviews }: { movies: Movie[]; reviews: Review[] }) {
   const [activeIdx, setActiveIdx] = useState(0);
-  const featured = [reviews[3], reviews[5], reviews[0]].filter((r): r is Review => Boolean(r));
+  const slides = reviews.filter((r) => r.featured);
+  const featured = slides.length > 0 ? slides : reviews.slice(0, 3);
 
   useEffect(() => {
     if (featured.length <= 1) return;
@@ -673,8 +674,14 @@ function WriteReviewModal({ onClose, onSubmit, movies }: { onClose: () => void; 
   const [rating, setRating] = useState(0);
   const [body, setBody] = useState("");
   const [movieId, setMovieId] = useState("");
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const ref = useFocusTrap(true);
+  const selected = movies.find((m) => m.id === movieId);
+  const matches = query.trim()
+    ? movies.filter((m) => (m.title + " " + m.year).toLowerCase().includes(query.trim().toLowerCase()))
+    : movies;
 
   useEffect(() => {
     const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -698,12 +705,36 @@ function WriteReviewModal({ onClose, onSubmit, movies }: { onClose: () => void; 
         </button>
         <h2 className="font-display font-900 text-2xl text-[var(--foreground)] mb-5">WRITE A REVIEW</h2>
         <div className="flex flex-col gap-4">
-          <div>
+          <div className="relative">
             <label className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 block">Movie</label>
-            <select value={movieId} onChange={(e) => { setMovieId(e.target.value); setFieldErrors((f) => ({ ...f, movie_id: "" })); }} aria-invalid={!!fieldErrors.movie_id} className="w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] outline-none focus:border-[var(--accent)] transition-colors">
-              <option value="">Select a movie…</option>
-              {movies.map((m) => <option key={m.id} value={m.id}>{m.title} ({m.year})</option>)}
-            </select>
+            <input
+              type="text"
+              value={selected ? selected.title : query}
+              onChange={(e) => { setQuery(e.target.value); setOpen(true); setFieldErrors((f) => ({ ...f, movie_id: "" })); }}
+              onFocus={() => setOpen(true)}
+              onBlur={() => setTimeout(() => setOpen(false), 150)}
+              placeholder="Search movies…"
+              aria-invalid={!!fieldErrors.movie_id}
+              className="w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors"
+            />
+            {open && (
+              <ul className="absolute z-10 left-0 right-0 top-full mt-1 max-h-56 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-2xl">
+                {matches.length === 0 && <li className="px-3 py-2 text-sm text-[var(--muted-foreground)]">No movies found</li>}
+                {matches.map((m) => (
+                  <li key={m.id}>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setMovieId(m.id); setQuery(""); setOpen(false); setFieldErrors((f) => ({ ...f, movie_id: "" })); }}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-left text-sm text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors"
+                    >
+                      <img src={m.poster} alt="" className="w-8 h-11 object-cover rounded" />
+                      <span className="flex-1">{m.title} <span className="text-[var(--muted-foreground)]">({m.year})</span></span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
             {fieldErrors.movie_id && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.movie_id}</p>}
           </div>
           <div>
@@ -820,6 +851,8 @@ function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls,
   const [rating, setRating] = useState("All");
   const [query, setQuery] = useState("");
   const [showWriteReview, setShowWriteReview] = useState(false);
+  const [showSearchReviews, setShowSearchReviews] = useState(false);
+  const [reviewQuery, setReviewQuery] = useState("");
   const [visibleCount, setVisibleCount] = useState(50);
 
   // Reset pagination whenever filters/search change so "Show more" starts fresh.
@@ -839,6 +872,14 @@ function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls,
     if (query && !m.title.toLowerCase().includes(query.toLowerCase()) && !m.director.toLowerCase().includes(query.toLowerCase())) return false;
     return true;
   });
+
+  const filteredReviews = reviewQuery.trim()
+    ? reviews.filter((r) => {
+        const movie = movies.find((m) => m.id === r.movie_id);
+        const hay = (r.body + " " + r.username + " " + (movie?.title ?? "")).toLowerCase();
+        return hay.includes(reviewQuery.trim().toLowerCase());
+      })
+    : reviews;
 
   return (
     <>
@@ -877,14 +918,33 @@ function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls,
             <h2 className="font-display font-900 text-4xl sm:text-5xl leading-none text-[var(--foreground)]">LATEST REVIEWS</h2>
           </div>
           <span className="flex-1 h-px bg-[var(--border)] mb-2" />
+          <button onClick={() => setShowSearchReviews((s) => !s)} className="btn-parallelogram mb-1 flex items-center gap-1.5 px-4 py-2 border border-[var(--border)] bg-transparent text-[var(--foreground)] text-sm font-bold hover:bg-[var(--muted)] transition-colors">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M21 21l-4.35-4.35M17 11a6 6 0 11-12 0 6 6 0 0112 0z" /></svg>
+            Search Reviews
+          </button>
           <button onClick={() => setShowWriteReview(true)} className="btn-parallelogram mb-1 flex items-center gap-1.5 px-4 py-2 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity">
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 4v16m8-8H4" /></svg>
             Write Review
           </button>
         </div>
+        {showSearchReviews && (
+          <div className="mb-5">
+            <input
+              type="text"
+              value={reviewQuery}
+              onChange={(e) => setReviewQuery(e.target.value)}
+              placeholder="Search reviews by text, member, or movie…"
+              autoFocus
+              className="w-full sm:max-w-md px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors"
+            />
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {reviews.map((r) => <ReviewCard key={r.id} review={r} replies={threads[r.id] || []} userVote={userVotes[r.id] ?? null} onVote={onVote} onReply={onReply} movies={movies} />)}
+          {filteredReviews.map((r) => <ReviewCard key={r.id} review={r} replies={threads[r.id] || []} userVote={userVotes[r.id] ?? null} onVote={onVote} onReply={onReply} movies={movies} />)}
         </div>
+        {showSearchReviews && reviewQuery.trim() && filteredReviews.length === 0 && (
+          <p className="text-sm text-[var(--muted-foreground)] mt-4">No reviews match "{reviewQuery}".</p>
+        )}
       </section>
 
       {/* Polls */}
@@ -1142,11 +1202,13 @@ function LeaderboardPage({ leaderboard }: { leaderboard: LeaderboardRow[] }) {
 }
 
 // ─── Profile Page ─────────────────────────────────────────────────────────────
-function ProfilePage({ movies, reviews, vault, members, following, onToggleFollow, session, onUploadAvatar }: {
-  movies: Movie[]; reviews: Review[]; vault: Record<VaultTab, string[]>; members: Profile[]; following: string[]; onToggleFollow: (id: string, username: string) => void; session: Session | null; onUploadAvatar: (file: File) => void;
+function ProfilePage({ movies, reviews, vault, members, following, onToggleFollow, session, onUploadAvatar, onUpdateUsername }: {
+  movies: Movie[]; reviews: Review[]; vault: Record<VaultTab, string[]>; members: Profile[]; following: string[]; onToggleFollow: (id: string, username: string) => void; session: Session | null; onUploadAvatar: (file: File) => void; onUpdateUsername: (username: string) => void;
 }) {
   const [tab, setTab] = useState<VaultTab>("watched");
   const [friendQ, setFriendQ] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   const vaultMovies = vault[tab].map((id) => movies.find((m) => m.id === id)).filter((m): m is Movie => Boolean(m));
@@ -1176,14 +1238,33 @@ function ProfilePage({ movies, reviews, vault, members, following, onToggleFollo
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-2 mb-1">
-            <h1 className="font-display font-900 text-3xl sm:text-4xl text-[var(--foreground)]">{username}</h1>
-            <Badge label={badgeFor(reviews.length)} />
+            {editing ? (
+              <input
+                value={nameDraft}
+                onChange={(e) => setNameDraft(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { onUpdateUsername(nameDraft.trim()); setEditing(false); } }}
+                autoFocus
+                className="font-display font-900 text-3xl sm:text-4xl text-[var(--foreground)] bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-1 w-full max-w-xs focus:outline-none focus:border-[var(--accent)]"
+              />
+            ) : (
+              <>
+                <h1 className="font-display font-900 text-3xl sm:text-4xl text-[var(--foreground)]">{username}</h1>
+                <Badge label={badgeFor(reviews.length)} />
+              </>
+            )}
           </div>
           <p className="text-sm text-[var(--muted-foreground)]">Member since Jan 2023 · Brooklyn, NY</p>
         </div>
-        <button className="btn-parallelogram px-5 py-2 bg-[var(--muted)] border border-[var(--border)] text-[var(--foreground)] text-sm font-semibold hover:border-[var(--accent)] transition-colors flex-shrink-0">
-          Edit Profile
-        </button>
+        {editing ? (
+          <div className="flex items-center gap-2 flex-shrink-0">
+            <button onClick={() => { onUpdateUsername(nameDraft.trim()); setEditing(false); }} disabled={!nameDraft.trim()} className="btn-parallelogram px-5 py-2 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity disabled:opacity-40">Save</button>
+            <button onClick={() => setEditing(false)} className="btn-parallelogram px-5 py-2 bg-[var(--muted)] border border-[var(--border)] text-[var(--foreground)] text-sm font-semibold hover:border-[var(--accent)] transition-colors">Cancel</button>
+          </div>
+        ) : (
+          <button onClick={() => { setNameDraft(username); setEditing(true); }} className="btn-parallelogram px-5 py-2 bg-[var(--muted)] border border-[var(--border)] text-[var(--foreground)] text-sm font-semibold hover:border-[var(--accent)] transition-colors flex-shrink-0">
+            Edit Profile
+          </button>
+        )}
       </div>
 
       {/* Stats row */}
@@ -1327,8 +1408,53 @@ function ProfilePage({ movies, reviews, vault, members, following, onToggleFollo
   );
 }
 
+// ─── Admin Gate ───────────────────────────────────────────────────────────────
+// Code-only gate. Anyone signed in can enter the club code to unlock the console;
+// on success we also promote the signed-in user to admin so admin writes pass RLS.
+function AdminGate({ session, onUnlock, onSignIn }: {
+  session: Session | null; onUnlock: () => void; onSignIn: () => void;
+}) {
+  const [code, setCode] = useState("");
+  const [error, setError] = useState(false);
+
+  if (!session) {
+    return (
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-32 pb-16 text-center">
+        <p className="font-display font-900 text-4xl text-[var(--muted-foreground)]">ADMIN</p>
+        <p className="text-sm text-[var(--muted-foreground)] mt-2">Sign in to unlock the admin console.</p>
+        <button onClick={onSignIn} className="btn-parallelogram mt-6 px-6 py-2.5 bg-[var(--accent)] text-black font-bold hover:opacity-90 transition-opacity text-sm tracking-wide">SIGN IN</button>
+      </div>
+    );
+  }
+
+  const submit = () => {
+    if (code.trim() === ADMIN_CODE) onUnlock();
+    else setError(true);
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-32 pb-16 text-center">
+      <p className="font-display font-900 text-4xl text-[var(--muted-foreground)]">ADMIN ONLY</p>
+      <p className="text-sm text-[var(--muted-foreground)] mt-2">Enter the club code to access the admin console.</p>
+      <div className="max-w-xs mx-auto mt-6 flex gap-2">
+        <input
+          type="password"
+          value={code}
+          onChange={(e) => { setCode(e.target.value); setError(false); }}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+          placeholder="Admin code"
+          autoFocus
+          className="flex-1 min-w-0 bg-[var(--background)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--accent)]"
+        />
+        <button onClick={submit} className="btn-parallelogram px-5 py-2 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity">ENTER</button>
+      </div>
+      {error && <p className="text-xs text-[var(--accent)] mt-3">Wrong code.</p>}
+    </div>
+  );
+}
+
 // ─── Admin Page ───────────────────────────────────────────────────────────────
-function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAddPoll, onTogglePoll, onDeletePoll, reviews, movies, threads, onDeleteReview, onAddMovie, onDeleteMovie, onDeleteComment, onUploadPoster, announcements, members, onAddAnnouncement, onDeleteAnnouncement, onSetMemberRole, session }: {
+function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAddPoll, onTogglePoll, onDeletePoll, reviews, movies, threads, onDeleteReview, onAddMovie, onDeleteMovie, onDeleteComment, onUploadPoster, announcements, members, onAddAnnouncement, onDeleteAnnouncement, onSetMemberRole, onSetReviewFeatured, session }: {
   screenings: Screening[]; onAddScreening: (s: Omit<Screening, "id">) => void; onDeleteScreening: (id: string) => void;
   polls: Poll[]; onAddPoll: (question: string, closes: string, options: string[]) => void; onTogglePoll: (id: string) => void; onDeletePoll: (id: string) => void;
   reviews: Review[]; movies: Movie[]; threads: Record<string, Reply[]>; onDeleteReview: (id: string) => void;
@@ -1337,7 +1463,7 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
   onUploadPoster: (file: File) => Promise<string>;
   announcements: Announcement[]; members: Profile[];
   onAddAnnouncement: (a: { title: string; body: string }) => void; onDeleteAnnouncement: (id: string) => void;
-  onSetMemberRole: (userId: string, role: "member" | "admin") => void; session: Session | null;
+  onSetMemberRole: (userId: string, role: "member" | "admin") => void; onSetReviewFeatured: (id: string, featured: boolean) => void; session: Session | null;
 }) {
   // Screening form
   const [sTitle, setSTitle] = useState("");
@@ -1501,6 +1627,7 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
                   <p className="text-sm font-semibold text-[var(--foreground)] truncate">{m ? m.title : "Unknown"} <span className="text-[var(--muted-foreground)] font-normal">· {r.username} · {r.rating}/10</span></p>
                   <p className="text-xs text-[var(--muted-foreground)] truncate">{r.body}</p>
                 </div>
+                <button onClick={() => onSetReviewFeatured(r.id, !r.featured)} className={`text-xs font-semibold transition-colors ${r.featured ? "text-[var(--accent)] hover:text-[var(--muted-foreground)]" : "text-[var(--muted-foreground)] hover:text-[var(--accent)]"}`}>{r.featured ? "Unfeature" : "Feature"}</button>
                 <button onClick={() => onDeleteReview(r.id)} className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors">Delete</button>
               </div>
             );
@@ -1638,8 +1765,8 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
 }
 
 // ─── Footer ───────────────────────────────────────────────────────────────────
-function Footer({ setPage, isAdmin }: { setPage: (p: Page) => void; isAdmin: boolean }) {
-  const pages: Page[] = ["home", "calendar", "leaderboard", "profile", ...(isAdmin ? ["admin" as Page] : [])];
+function Footer({ setPage }: { setPage: (p: Page) => void }) {
+  const pages: Page[] = ["home", "calendar", "leaderboard", "profile", "admin"];
   return (
     <footer className="border-t border-[var(--border)] bg-[var(--muted)]/40">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
@@ -1670,7 +1797,7 @@ export default function App() {
   useRealtime();
   const session = useSession();
   const auth = useAuth();
-  const isAdmin = session?.user.role === "admin";
+  const [adminUnlocked, setAdminUnlocked] = usePersistentState("ac-admin-unlock", () => false);
 
   const movies = useMovies();
   const reviews = useReviews();
@@ -1703,6 +1830,8 @@ export default function App() {
   const addAnnouncement = useAddAnnouncement();
   const deleteAnnouncement = useDeleteAnnouncement();
   const setMemberRole = useSetMemberRole();
+  const setReviewFeatured = useSetReviewFeatured();
+  const updateUsername = useUpdateUsername();
 
   const setPageSafe = useCallback((p: Page) => setPage(p), []);
 
@@ -1817,27 +1946,44 @@ export default function App() {
     setMemberRole.mutate({ userId, role }, { onSuccess: () => push("Role updated") });
   };
 
+  const unlockAdmin = () => {
+    setAdminUnlocked(true);
+    if (session) {
+      setMemberRole.mutate({ userId: session.user.id, role: "admin" }, { onSuccess: () => push("Admin unlocked") });
+    }
+  };
+
+  const onSetReviewFeatured = (id: string, featured: boolean) => {
+    setReviewFeatured.mutate({ reviewId: id, featured }, { onSuccess: () => push(featured ? "Review featured" : "Review unfeatured") });
+  };
+
+  const onUpdateUsername = (username: string) => {
+    updateUsername.mutate(username, {
+      onSuccess: () => {
+        if (session) setSession({ user: { ...session.user, username } });
+        push("Profile updated");
+      },
+    });
+  };
+
   return (
     <div className={`${dark ? "" : "light"} min-h-screen bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300`} style={{ fontFamily: "'Outfit', sans-serif" }}>
       {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
       <Toast toasts={toasts} />
 
-      <NavBar page={page} setPage={setPageSafe} dark={dark} setDark={setDark} session={session} isAdmin={isAdmin} onSignIn={() => setShowSignIn(true)} onSignOut={() => auth.signOut()} />
+      <NavBar page={page} setPage={setPageSafe} dark={dark} setDark={setDark} session={session} onSignIn={() => setShowSignIn(true)} onSignOut={() => auth.signOut()} />
 
       <main>
         {page === "home" && <HomePage movies={moviesData} reviews={reviewsData} threads={threadsData} userVotes={userVotesData} onVote={onVote} onReply={onReply} polls={pollsData} pollVotes={pollVotesData} onPollVote={onPollVote} favorites={vaultData.favorites} onToggleFavorite={onToggleFavorite} onWriteReview={onWriteReview} announcements={announcementsData} />}
         {page === "calendar" && <CalendarPage screenings={screeningsData} push={push} />}
         {page === "leaderboard" && <LeaderboardPage leaderboard={leaderboardData} />}
-        {page === "profile" && <ProfilePage movies={moviesData} reviews={reviewsData} vault={vaultData} members={membersData} following={followingData} onToggleFollow={onToggleFollow} session={session} onUploadAvatar={onUploadAvatar} />}
-        {page === "admin" && (isAdmin ? <AdminPage screenings={screeningsData} onAddScreening={onAddScreening} onDeleteScreening={onDeleteScreening} polls={pollsData} onAddPoll={onAddPoll} onTogglePoll={onTogglePoll} onDeletePoll={onDeletePoll} reviews={reviewsData} movies={moviesData} threads={threadsData} onDeleteReview={onDeleteReview} onAddMovie={onAddMovie} onDeleteMovie={onDeleteMovie} onDeleteComment={onDeleteComment} onUploadPoster={onUploadPoster} announcements={announcementsData} members={membersData} onAddAnnouncement={onAddAnnouncement} onDeleteAnnouncement={onDeleteAnnouncement} onSetMemberRole={onSetMemberRole} session={session} /> : (
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-32 pb-16 text-center">
-            <p className="font-display font-900 text-4xl text-[var(--muted-foreground)]">ADMIN ONLY</p>
-            <p className="text-sm text-[var(--muted-foreground)] mt-2">You need the admin role to see this page.</p>
-          </div>
+        {page === "profile" && <ProfilePage movies={moviesData} reviews={reviewsData} vault={vaultData} members={membersData} following={followingData} onToggleFollow={onToggleFollow} session={session} onUploadAvatar={onUploadAvatar} onUpdateUsername={onUpdateUsername} />}
+        {page === "admin" && (adminUnlocked && session ? <AdminPage screenings={screeningsData} onAddScreening={onAddScreening} onDeleteScreening={onDeleteScreening} polls={pollsData} onAddPoll={onAddPoll} onTogglePoll={onTogglePoll} onDeletePoll={onDeletePoll} reviews={reviewsData} movies={moviesData} threads={threadsData} onDeleteReview={onDeleteReview} onAddMovie={onAddMovie} onDeleteMovie={onDeleteMovie} onDeleteComment={onDeleteComment} onUploadPoster={onUploadPoster} announcements={announcementsData} members={membersData} onAddAnnouncement={onAddAnnouncement} onDeleteAnnouncement={onDeleteAnnouncement} onSetMemberRole={onSetMemberRole} onSetReviewFeatured={onSetReviewFeatured} session={session} /> : (
+          <AdminGate session={session} onUnlock={unlockAdmin} onSignIn={() => setShowSignIn(true)} />
         ))}
       </main>
 
-      <Footer setPage={setPageSafe} isAdmin={isAdmin} />
+      <Footer setPage={setPageSafe} />
     </div>
   );
 }

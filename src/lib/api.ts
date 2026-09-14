@@ -15,6 +15,7 @@ import {
   mockAddScreening, mockDeleteScreening, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview,
   mockAddMovie, mockDeleteMovie, mockDeleteComment,
   mockMembers, mockSetMemberRole, mockAnnouncements, mockAddAnnouncement, mockDeleteAnnouncement,
+  mockSetReviewFeatured, mockUpdateUsername,
 } from "./mock";
 
 function to12h(t: string): string {
@@ -43,15 +44,18 @@ export async function signInEmail(email: string, password: string): Promise<Sess
 
 export async function signUpEmail(email: string, password: string, username: string): Promise<Session | null> {
   if (!isSupabaseConfigured) return { user: MOCK_USER };
+  const domain = email.split("@")[1]?.toLowerCase();
+  if (domain !== "tsinglan.org") throw new Error("Sign up is restricted to @tsinglan.org email addresses");
   const sb = requireSupabase();
-  const { error } = await sb.auth.signUp({ email, password, options: { data: { username } } });
+  const { error } = await sb.auth.signUp({
+    email,
+    password,
+    options: { data: { username }, emailRedirectTo: window.location.origin },
+  });
   if (error) throw error;
-  return null; // Email confirmation may be required before a session exists.
-}
-
-export async function signInGoogle(): Promise<void> {
-  const sb = requireSupabase();
-  await sb.auth.signInWithOAuth({ provider: "google" });
+  // Email confirmation is on, so no session yet — Supabase sends a verification
+  // email to the address; the user clicks the link, then signs in.
+  return null;
 }
 
 export async function signOut(): Promise<void> {
@@ -91,6 +95,7 @@ export async function listReviews(): Promise<Review[]> {
     username: username.get(r.author_id) ?? "Member",
     rating: r.rating, body: r.body, created_at: r.created_at,
     upvotes: tally.get(r.id)?.up ?? 0, downvotes: tally.get(r.id)?.down ?? 0,
+    featured: r.featured ?? false,
   }));
 }
 
@@ -252,7 +257,7 @@ export async function createReview(input: { movie_id: string; rating: number; bo
   return {
     id: "", movie_id: input.movie_id, author_id: uid,
     username: profile?.username ?? "Member", rating: input.rating, body: input.body,
-    upvotes: 0, downvotes: 0, created_at: new Date().toISOString(),
+    upvotes: 0, downvotes: 0, created_at: new Date().toISOString(), featured: false,
   };
 }
 
@@ -427,6 +432,18 @@ export async function deleteAnnouncement(id: string): Promise<void> {
 export async function setMemberRole(userId: string, role: "member" | "admin"): Promise<void> {
   if (!isSupabaseConfigured) { mockSetMemberRole(userId, role); return; }
   await requireSupabase().from("profiles").update({ role }).eq("id", userId);
+}
+
+export async function setReviewFeatured(reviewId: string, featured: boolean): Promise<void> {
+  if (!isSupabaseConfigured) { mockSetReviewFeatured(reviewId, featured); return; }
+  await requireSupabase().from("reviews").update({ featured }).eq("id", reviewId);
+}
+
+export async function updateUsername(username: string): Promise<void> {
+  if (!isSupabaseConfigured) { mockUpdateUsername(username); return; }
+  const uid = await currentUserId();
+  if (!uid) return;
+  await requireSupabase().from("profiles").update({ username }).eq("id", uid);
 }
 
 // ─── Storage ─────────────────────────────────────────────────────────────────

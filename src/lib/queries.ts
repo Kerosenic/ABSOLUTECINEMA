@@ -54,9 +54,6 @@ export function useAuth() {
       if (s) setSession(s);
       return s;
     },
-    signInGoogle: async () => {
-      await api.signInGoogle();
-    },
     signOut: async () => {
       await api.signOut();
       setSession(null);
@@ -166,7 +163,7 @@ export function useCreateReview() {
       const review: Review = {
         id: `tmp-${Date.now()}`, movie_id: input.movie_id, author_id: uid,
         username, rating: input.rating, body: input.body,
-        upvotes: 0, downvotes: 0, created_at: new Date().toISOString(),
+        upvotes: 0, downvotes: 0, created_at: new Date().toISOString(), featured: false,
       };
       return [review, ...old];
     });
@@ -350,5 +347,21 @@ export function useSetMemberRole() {
     [["members"]],
     (args, qc) => patch<Profile[]>(qc, ["members"], (old) =>
       old.map((m) => (m.id === args.userId ? { ...m, role: args.role } : m))),
+  );
+}
+
+export function useSetReviewFeatured() {
+  return useOptimisticMutation(
+    (args: { reviewId: string; featured: boolean }) => api.setReviewFeatured(args.reviewId, args.featured),
+    [["reviews"]],
+    (args, qc) => patch<Review[]>(qc, ["reviews"], (old) =>
+      old.map((r) => (r.id === args.reviewId ? { ...r, featured: args.featured } : r))),
+  );
+}
+
+export function useUpdateUsername() {
+  return useOptimisticMutation(
+    (username: string) => api.updateUsername(username),
+    [["members"]],
   );
 }

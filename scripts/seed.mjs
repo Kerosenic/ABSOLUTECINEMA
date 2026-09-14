@@ -1262,19 +1262,19 @@ async function main() {
   console.log("Seeded users:", Object.keys(userIds).length);
 
   const reviewRows = [
-    { id: "r1", movie_id: "33", username: "CinemaVault",    rating: 9,  body: "Pixar back in peak form. Anxiety as the villain is the most honest depiction of growing up since Toy Story. The panic-attack sequence is unforgettable.", days: 2 },
-    { id: "r2", movie_id: "2", username: "FilmNoir88",      rating: 9,  body: "A quiet devastation. Past Lives understands longing better than almost any film in recent memory. Greta Lee is a force of nature.", days: 4 },
-    { id: "r3", movie_id: "3", username: "ReelTalk",        rating: 8,  body: "Villeneuve delivers a visually staggering epic. The sandworm sequences are the most awe-inspiring spectacle in years. Zendaya earns every second.", days: 7 },
-    { id: "r4", movie_id: "37", username: "SunsetBoulevard", rating: 10, body: "The most visually audacious animated film ever made. Every frame is a painting — Gwen's opening sequence alone is worth the price of admission.", days: 7 },
-    { id: "r5", movie_id: "46", username: "NewWaveNick",     rating: 8,  body: "A grim, rain-soaked detective story that finally treats Batman like a noir protagonist. Pattinson and Kravitz crackle in every scene.", days: 14 },
-    { id: "r6", movie_id: "28", username: "OscarBait",       rating: 9,  body: "Pure blockbuster adrenaline with a beating heart. The final-act flight sequences are the best aerial action committed to film in years.", days: 21 },
+    { id: "r1", movie_id: "33", username: "CinemaVault",    rating: 9,  body: "Pixar back in peak form. Anxiety as the villain is the most honest depiction of growing up since Toy Story. The panic-attack sequence is unforgettable.", days: 2,  featured: true },
+    { id: "r2", movie_id: "2", username: "FilmNoir88",      rating: 9,  body: "A quiet devastation. Past Lives understands longing better than almost any film in recent memory. Greta Lee is a force of nature.", days: 4,  featured: false },
+    { id: "r3", movie_id: "3", username: "ReelTalk",        rating: 8,  body: "Villeneuve delivers a visually staggering epic. The sandworm sequences are the most awe-inspiring spectacle in years. Zendaya earns every second.", days: 7,  featured: false },
+    { id: "r4", movie_id: "37", username: "SunsetBoulevard", rating: 10, body: "The most visually audacious animated film ever made. Every frame is a painting — Gwen's opening sequence alone is worth the price of admission.", days: 7,  featured: true },
+    { id: "r5", movie_id: "46", username: "NewWaveNick",     rating: 8,  body: "A grim, rain-soaked detective story that finally treats Batman like a noir protagonist. Pattinson and Kravitz crackle in every scene.", days: 14, featured: false },
+    { id: "r6", movie_id: "28", username: "OscarBait",       rating: 9,  body: "Pure blockbuster adrenaline with a beating heart. The final-act flight sequences are the best aerial action committed to film in years.", days: 21, featured: true },
   ];
 
   const reviewIdByKey = {};
   for (const r of reviewRows) {
     const movie = movies.find((m) => m.id === r.movie_id);
     const { data, error } = await sb.from("reviews")
-      .insert({ author_id: userIds[r.username], movie_id: r.movie_id, title: movie.title, poster_url: movie.poster_url, rating: r.rating, body: r.body, created_at: daysAgo(r.days) })
+      .insert({ author_id: userIds[r.username], movie_id: r.movie_id, title: movie.title, poster_url: movie.poster_url, rating: r.rating, body: r.body, created_at: daysAgo(r.days), featured: r.featured })
       .select("id").single();
     if (error) throw error;
     reviewIdByKey[r.id] = data.id;

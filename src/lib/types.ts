@@ -34,6 +34,7 @@ export interface Review {
   upvotes: number;
   downvotes: number;
   created_at: string;
+  featured: boolean;
 }
 
 export interface Reply {
