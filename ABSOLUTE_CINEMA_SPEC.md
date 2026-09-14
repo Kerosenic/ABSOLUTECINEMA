@@ -405,6 +405,6 @@ Ordered roadmap to take the front-end prototype to a complete, deployed app runn
 1. TMDb: add a movie catalog import (TMDb key), or keep the seed list — decide before launch.
 2. Accessibility: keyboard navigation, ARIA labels, focus states; confirm responsiveness.
 
-### 9.2 Deploy + go-live (done)
-
-Supabase project created, `schema.sql` run, `.env` set, seed run, Vercel deployed. Remaining manual work is only inviting members.
+### 9.2 additional updates/features/adjustments
+- change "club rankings" in leaderboards to "school rankings"
+- 

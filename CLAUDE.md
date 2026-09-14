@@ -29,3 +29,6 @@ The spec describes a full-stack build (Next.js + Supabase + React Query + Zod). 
 
 - Components are local functions with default export only on `App`. Keep new components in `App.tsx` unless the file is split out deliberately.
 - All interactive bits (votes, polls, vault save, follow) are optimistic local state with a `push(text)` toast call — no persistence.
+
+## RESPONSES
+- give user advice on how to make better prompts to use less tokens and get better results
