@@ -25,16 +25,17 @@
   --foreground: #f0ede8;
   --card: #131316;
   --card-foreground: #f0ede8;
-  --primary: #d4930a;
+  --primary: #ff2b3d;
   --primary-foreground: #0a0a0c;
   --secondary: #1c1c21;
   --secondary-foreground: #a8a5a0;
   --muted: #18181c;
   --muted-foreground: #6b6866;
-  --accent: #f5a623;
-  --accent-foreground: #0a0a0c;
+  --accent: #ff1a44;
+  --accent-foreground: #ffffff;
   --border: #252529;
-  --ring: #d4930a;
+  --ring: #ff1a44;
+  --star: #f5a623;
   --radius: 0.5rem;
 }
 
@@ -43,16 +44,17 @@
   --foreground: #0a0a0c;
   --card: #ffffff;
   --card-foreground: #0a0a0c;
-  --primary: #c4820a;
+  --primary: #ff2b3d;
   --primary-foreground: #ffffff;
   --secondary: #ebe8e3;
   --secondary-foreground: #3a3a3f;
   --muted: #e2dfd9;
   --muted-foreground: #737068;
-  --accent: #c4820a;
+  --accent: #ff1a44;
   --accent-foreground: #ffffff;
   --border: #dedad4;
-  --ring: #c4820a;
+  --ring: #ff1a44;
+  --star: #f5a623;
   --radius: 0.5rem;
 }
 
@@ -76,6 +78,10 @@ html, body, #root {
 
 .hide-scrollbar::-webkit-scrollbar { display: none; }
 .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.btn-parallelogram {
+  clip-path: polygon(14px 0, 100% 0, calc(100% - 14px) 100%, 0 100%);
+}
 
 @keyframes fade-in {
   from { opacity: 0; transform: translateY(8px) translateX(-50%); }
