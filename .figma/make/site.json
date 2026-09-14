@@ -1,0 +1,10 @@
+{
+  "description": "Connect with fellow movie enthusiasts through reviews, polls, and personalized profiles while enjoying a sleek, cinematic experience in dark or light mode.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

@@ -1,0 +1,88 @@
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-border: var(--border);
+  --color-ring: var(--ring);
+  --radius-default: var(--radius);
+}
+
+:root {
+  --background: #0a0a0c;
+  --foreground: #f0ede8;
+  --card: #131316;
+  --card-foreground: #f0ede8;
+  --primary: #d4930a;
+  --primary-foreground: #0a0a0c;
+  --secondary: #1c1c21;
+  --secondary-foreground: #a8a5a0;
+  --muted: #18181c;
+  --muted-foreground: #6b6866;
+  --accent: #f5a623;
+  --accent-foreground: #0a0a0c;
+  --border: #252529;
+  --ring: #d4930a;
+  --radius: 0.5rem;
+}
+
+.light {
+  --background: #f5f3ef;
+  --foreground: #0a0a0c;
+  --card: #ffffff;
+  --card-foreground: #0a0a0c;
+  --primary: #c4820a;
+  --primary-foreground: #ffffff;
+  --secondary: #ebe8e3;
+  --secondary-foreground: #3a3a3f;
+  --muted: #e2dfd9;
+  --muted-foreground: #737068;
+  --accent: #c4820a;
+  --accent-foreground: #ffffff;
+  --border: #dedad4;
+  --ring: #c4820a;
+  --radius: 0.5rem;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+* {
+  font-family: 'Outfit', sans-serif;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+*::-webkit-scrollbar { width: 4px; height: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.font-display {
+  font-family: 'Barlow Condensed', sans-serif;
+}
+
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px) translateX(-50%); }
+  to   { opacity: 1; transform: translateY(0)   translateX(-50%); }
+}
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out forwards;
+  position: relative;
+  left: 0; transform: none;
+}
