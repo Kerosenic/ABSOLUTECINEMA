@@ -110,3 +110,37 @@ npm run build             # production build (types are stripped; use tsc for a 
 npx tsc --noEmit          # full type check
 npm run seed              # seed the configured Supabase project (service role)
 ```
+
+---
+
+## Email verification code (sign-up) — YOU
+
+Sign-up now works like this: user enters email/password/username → a 6-digit code is emailed → user types the code → the account is created (confirmed). Unverified emails have no account, so they can't be signed into.
+
+This needs two pieces you must set up once:
+
+1. **Re-run `supabase/schema.sql`** in the SQL Editor (adds the `signup_codes` table).
+
+2. **Brevo** (transactional email, free tier is fine):
+   - Sign up at <https://www.brevo.com>.
+   - **Senders & IP** → add `absolute.cinema.emailsender@gmail.com` as a sender, then click the confirmation link Brevo emails you.
+   - **SMTP & API → API Keys** → generate a v3 key.
+
+3. **Deploy the two Edge Functions.** The Supabase CLI runs via `npx` here (no global install needed). Log in, link the project, then:
+
+   ```bash
+   npx supabase login
+   npx supabase link --project-ref ptoybrghbnuxxwyqxvrl
+   npx supabase secrets set BREVO_API_KEY=xkeysib-xxxxxxxx
+   # optional: npx supabase secrets set BREVO_FROM_EMAIL="absolute.cinema.emailsender@gmail.com"
+   # optional: npx supabase secrets set BREVO_FROM_NAME="Absolute Cinema"
+   npx supabase functions deploy send-code
+   npx supabase functions deploy verify-signup
+   ```
+
+   (Default sender is `absolute.cinema.emailsender@gmail.com` / `Absolute Cinema`. Gmail SMTP is not used — Supabase Edge Functions block outbound TCP to SMTP ports 25/465/587, so `send-code` calls the Brevo v3 HTTPS API instead.)
+
+4. **Confirm email** is no longer required for this flow — the Edge Function creates the user already confirmed (`email_confirm: true`). You can leave **Authentication → Providers → Email → Confirm email** OFF, or leave it ON; it won't interfere.
+
+The code flow is live once both functions are deployed and `BREVO_API_KEY` is set.
+

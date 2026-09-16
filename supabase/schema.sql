@@ -478,3 +478,18 @@ grant usage on schema public to anon, authenticated, service_role;
 grant select, insert, update, delete on all tables in schema public to anon, authenticated, service_role;
 grant execute on function public.is_admin() to anon, authenticated, service_role;
 grant execute on function public.get_leaderboard() to anon, authenticated, service_role;
+
+-- ─── Sign-up verification codes ─────────────────────────────────────────
+-- Holds the 6-digit code a user must type before their auth account exists.
+-- Written and read only by the Edge Functions (service_role). Never exposed to
+-- anon/authenticated — the blanket grant above is revoked below.
+create table if not exists public.signup_codes (
+  email text primary key,
+  code text not null,
+  expires_at timestamptz not null,
+  attempts int not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table public.signup_codes enable row level security;
+revoke all on public.signup_codes from anon, authenticated;
+grant all on public.signup_codes to service_role;

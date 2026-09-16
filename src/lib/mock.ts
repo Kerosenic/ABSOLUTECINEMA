@@ -1275,17 +1275,17 @@ export const LEADERBOARD: LeaderboardRow[] = [
 export function seedScreenings(): Screening[] {
   const now = new Date();
   const pad = (n: number) => String(n).padStart(2, "0");
-  const mk = (i: number, offset: number, title: string, time: string, location: string): Screening => {
+  const mk = (i: number, offset: number, title: string, time: string, location: string, poster: string): Screening => {
     const d = new Date(now);
     d.setDate(d.getDate() + offset);
-    return { id: `s${i}`, title, time, location, date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` };
+    return { id: `s${i}`, title, time, location, poster, date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` };
   };
   return [
-    mk(1, 2,  "Eraserhead (1977)",        "8:00 PM",  "The Roxy Cinema, Brooklyn"),
-    mk(2, 5,  "Mulholland Drive (2001)",  "7:30 PM",  "IFC Center, Manhattan"),
-    mk(3, 9,  "2001: A Space Odyssey",    "9:00 PM",  "Alamo Drafthouse, LIC"),
-    mk(4, 16, "Possession (1981)",        "8:30 PM",  "Metrograph, Lower East Side"),
-    mk(5, 23, "Halloween (1978)",         "10:00 PM", "Nitehawk Cinema, Williamsburg"),
+    mk(1, 2,  "Eraserhead (1977)",        "8:00 PM",  "The Roxy Cinema, Brooklyn",    "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/e/e8/Eraserhead_poster.jpg&w=500"),
+    mk(2, 5,  "Mulholland Drive (2001)",  "7:30 PM",  "IFC Center, Manhattan",        "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/0/0f/Mulholland_Drive_poster.jpg&w=500"),
+    mk(3, 9,  "2001: A Space Odyssey",    "9:00 PM",  "Alamo Drafthouse, LIC",        "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/e/ef/2001_A_Space_Odyssey_%281968%29.png&w=500"),
+    mk(4, 16, "Possession (1981)",        "8:30 PM",  "Metrograph, Lower East Side",  "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/4/4b/Possession_1981_poster.jpg&w=500"),
+    mk(5, 23, "Halloween (1978)",         "10:00 PM", "Nitehawk Cinema, Williamsburg", "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/a/a5/Halloween_%281978%29_theatrical_poster.jpg&w=500"),
   ];
 }
 
@@ -1305,7 +1305,7 @@ const KEYS = {
   userVotes: "ac:v2:uservotes",
   polls: "ac:v2:polls",
   pollVotes: "ac:v2:pollvotes",
-  screenings: "ac:v2:screenings",
+  screenings: "ac:v3:screenings",
   vault: "ac:v2:vault",
   following: "ac:v2:following",
   notifications: "ac:v2:notifications",

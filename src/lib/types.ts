@@ -65,6 +65,7 @@ export interface Screening {
   date: string;
   time: string;
   location: string;
+  poster?: string;
 }
 
 export type VaultTab = "watched" | "plantowatch" | "favorites";

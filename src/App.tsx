@@ -171,7 +171,10 @@ function SignInModal({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [username, setUsername] = useState("");
+  const [code, setCode] = useState("");
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const auth = useAuth();
@@ -186,19 +189,41 @@ function SignInModal({ onClose }: { onClose: () => void }) {
   const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
 
   const submit = async () => {
+    // Sign-up, step 2: verify the code, then create the account and sign in.
+    if (mode === "signup" && sent) {
+      if (!/^\d{6}$/.test(code)) {
+        setError("Enter the 6-digit code");
+        return;
+      }
+      setBusy(true);
+      setError(null);
+      setNotice(null);
+      try {
+        await auth.verifySignup(email, pass, username, code);
+        await auth.signIn(email, pass);
+        onClose();
+      } catch (e) {
+        setError(msg(e));
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     const { errors } = parseForm(mode === "signin" ? signInSchema : signUpSchema, { email, password: pass, username });
     setFieldErrors(errors);
     if (Object.keys(errors).length) return;
     setBusy(true);
     setError(null);
+    setNotice(null);
     try {
       if (mode === "signin") {
         await auth.signIn(email, pass);
         onClose();
       } else {
-        const s = await auth.signUp(email, pass, username);
-        if (s) onClose();
-        else setError("Account created — check your email to confirm, then sign in.");
+        await auth.sendSignupCode(email);
+        setSent(true);
+        setNotice(`Code sent to ${email}. Check spam if you don't see it.`);
       }
     } catch (e) {
       setError(msg(e));
@@ -225,32 +250,41 @@ function SignInModal({ onClose }: { onClose: () => void }) {
         <div className="flex flex-col gap-3 mb-5">
           {mode === "signup" && (
             <div>
-              <input value={username} onChange={(e) => { setUsername(e.target.value); setFieldErrors((f) => ({ ...f, username: "" })); }} placeholder="Username" aria-invalid={!!fieldErrors.username} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+              <input value={username} disabled={sent} onChange={(e) => { setUsername(e.target.value); setFieldErrors((f) => ({ ...f, username: "" })); }} placeholder="Username" aria-invalid={!!fieldErrors.username} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-50" />
               {fieldErrors.username && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.username}</p>}
             </div>
           )}
           <div>
-            <input type="email" value={email} onChange={(e) => { setEmail(e.target.value); setFieldErrors((f) => ({ ...f, email: "" })); }} placeholder="Email address" aria-invalid={!!fieldErrors.email} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+            <input type="email" value={email} disabled={sent} onChange={(e) => { setEmail(e.target.value); setFieldErrors((f) => ({ ...f, email: "" })); }} placeholder="Email address" aria-invalid={!!fieldErrors.email} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-50" />
             {fieldErrors.email && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.email}</p>}
-            {mode === "signup" && !fieldErrors.email && (
+            {mode === "signup" && !fieldErrors.email && !sent && (
               <p className="text-xs text-[var(--muted-foreground)] mt-1">Use a @tsinglan.org email</p>
             )}
           </div>
           <div>
-            <input type="password" value={pass} onChange={(e) => { setPass(e.target.value); setFieldErrors((f) => ({ ...f, password: "" })); }} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Password" aria-invalid={!!fieldErrors.password} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors" />
+            <input type="password" value={pass} disabled={sent} onChange={(e) => { setPass(e.target.value); setFieldErrors((f) => ({ ...f, password: "" })); }} onKeyDown={(e) => e.key === "Enter" && submit()} placeholder="Password" aria-invalid={!!fieldErrors.password} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors disabled:opacity-50" />
             {fieldErrors.password && <p className="text-xs text-[var(--accent)] mt-1">{fieldErrors.password}</p>}
           </div>
+          {mode === "signup" && sent && (
+            <div>
+              <input value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setError(null); }} onKeyDown={(e) => e.key === "Enter" && submit()} inputMode="numeric" maxLength={6} placeholder="6-digit code" aria-invalid={!!error} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors tracking-[0.3em] text-center" />
+              <button onClick={() => { auth.sendSignupCode(email).catch((e) => setError(msg(e))); }} className="text-xs text-[var(--accent)] font-semibold hover:opacity-80 mt-1">
+                Resend code
+              </button>
+            </div>
+          )}
         </div>
 
+        {notice && <p className="text-xs text-[var(--muted-foreground)] mb-4">{notice}</p>}
         {error && <p className="text-xs text-[var(--accent)] mb-4">{error}</p>}
 
         <button onClick={submit} disabled={busy || !email || !pass} className="btn-parallelogram w-full py-3 bg-[var(--accent)] text-black font-bold hover:opacity-90 transition-opacity text-sm tracking-wide disabled:opacity-40">
-          {busy ? "PLEASE WAIT…" : mode === "signin" ? "SIGN IN" : "CREATE ACCOUNT"}
+          {busy ? "PLEASE WAIT…" : mode === "signin" ? "SIGN IN" : sent ? "VERIFY & CREATE" : "SEND CODE"}
         </button>
 
         <p className="text-xs text-center text-[var(--muted-foreground)] mt-4">
           {mode === "signin" ? "New here?" : "Already a member?"}{" "}
-          <button onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(null); setFieldErrors({}); }} className="text-[var(--accent)] font-semibold hover:opacity-80">
+          <button onClick={() => { setMode(mode === "signin" ? "signup" : "signin"); setError(null); setNotice(null); setFieldErrors({}); setSent(false); setCode(""); }} className="text-[var(--accent)] font-semibold hover:opacity-80">
             {mode === "signin" ? "Create an account" : "Sign in"}
           </button>
         </p>
@@ -995,10 +1029,21 @@ function HomePage({ movies, reviews, threads, userVotes, onVote, onReply, polls,
 }
 
 // ─── Calendar Page ────────────────────────────────────────────────────────────
+const SEED_ATTENDEES: Record<string, string[]> = {
+  s1: ["Mara", "Dev", "Lena"],
+  s2: ["Jonah", "Priya", "Tomás", "Wren"],
+  s3: ["Aisha", "Nico", "Bea"],
+  s4: ["Casper", "Ines"],
+  s5: [],
+};
+
 function CalendarPage({ screenings, push }: { screenings: Screening[]; push: (t: string) => void }) {
   const today = new Date();
   const [view, setView] = useState({ y: today.getFullYear(), m: today.getMonth() });
   const [selected, setSelected] = useState<number | null>(null);
+  const [joined, setJoined] = useState<Set<string>>(new Set());
+  const [attendees, setAttendees] = useState<Record<string, string[]>>(SEED_ATTENDEES);
+  const [viewing, setViewing] = useState<string | null>(null);
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
   const firstDay = new Date(view.y, view.m, 1).getDay();
@@ -1032,6 +1077,18 @@ function CalendarPage({ screenings, push }: { screenings: Screening[]; push: (t:
       return { y: v.y, m };
     });
     setSelected(null);
+  };
+
+  const toggleJoin = (id: string) => {
+    if (joined.has(id)) {
+      setJoined((prev) => { const next = new Set(prev); next.delete(id); return next; });
+      setAttendees((prev) => ({ ...prev, [id]: (prev[id] ?? []).filter((u) => u !== "You") }));
+      push("You left the screening.");
+    } else {
+      setJoined((prev) => new Set(prev).add(id));
+      setAttendees((prev) => ({ ...prev, [id]: [...(prev[id] ?? []), "You"] }));
+      push("You're in — see you there!");
+    }
   };
 
   return (
@@ -1080,7 +1137,10 @@ function CalendarPage({ screenings, push }: { screenings: Screening[]; push: (t:
         <div className="flex flex-col gap-3">
           {selectedEvent ? (
             <div className="bg-[var(--accent)]/10 border border-[var(--accent)]/30 rounded-2xl p-5 mb-2">
-              <p className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider mb-2">Selected Screening</p>
+              <p className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider mb-3">Selected Screening</p>
+              {selectedEvent.poster && (
+                <img src={selectedEvent.poster} alt={selectedEvent.title} loading="lazy" decoding="async" onError={(e) => { e.currentTarget.style.opacity = "0"; }} className="w-full aspect-[16/9] object-cover rounded-xl bg-[var(--muted)] mb-3" />
+              )}
               <h3 className="font-display font-800 text-xl text-[var(--foreground)] leading-tight mb-3">{selectedEvent.title}</h3>
               <div className="flex flex-col gap-1.5">
                 <div className="flex items-center gap-2 text-sm text-[var(--secondary-foreground)]">
@@ -1096,7 +1156,10 @@ function CalendarPage({ screenings, push }: { screenings: Screening[]; push: (t:
                   {selectedEvent.date}
                 </div>
               </div>
-              <button onClick={() => push("RSVP confirmed — see you there!")} className="btn-parallelogram w-full mt-4 py-2 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity">RSVP →</button>
+              <div className="flex items-center gap-2 mt-4">
+                <button onClick={() => toggleJoin(selectedEvent.id)} className={`btn-parallelogram flex-1 py-2 text-sm font-bold transition-opacity hover:opacity-90 ${joined.has(selectedEvent.id) ? "bg-[var(--muted)] text-[var(--foreground)] border border-[var(--border)]" : "bg-[var(--accent)] text-black"}`}>{joined.has(selectedEvent.id) ? "Leave" : "Join"}</button>
+                <button onClick={() => setViewing(selectedEvent.id)} className="btn-parallelogram px-4 py-2 bg-transparent border border-[var(--accent)] text-[var(--accent)] text-sm font-bold hover:bg-[var(--accent)] hover:text-black transition-colors">View</button>
+              </div>
             </div>
           ) : (
             <p className="text-sm text-[var(--muted-foreground)] text-center py-4">Click a highlighted date to see details</p>
@@ -1125,6 +1188,38 @@ function CalendarPage({ screenings, push }: { screenings: Screening[]; push: (t:
           })}
         </div>
       </div>
+
+      {viewing && (() => {
+        const ev = screenings.find((s) => s.id === viewing);
+        const list = attendees[viewing] ?? [];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm" onClick={() => setViewing(null)}>
+            <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 w-full max-w-sm" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between mb-4">
+                <div>
+                  <p className="text-xs font-bold text-[var(--accent)] uppercase tracking-wider mb-1">Attendees</p>
+                  <h3 className="font-display font-800 text-lg text-[var(--foreground)] leading-tight">{ev?.title}</h3>
+                </div>
+                <button onClick={() => setViewing(null)} aria-label="Close" className="text-[var(--muted-foreground)] hover:text-[var(--foreground)] transition-colors">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                </button>
+              </div>
+              {list.length === 0 ? (
+                <p className="text-sm text-[var(--muted-foreground)] py-4">No one has joined yet.</p>
+              ) : (
+                <ul className="flex flex-col gap-2 max-h-64 overflow-y-auto">
+                  {list.map((u, i) => (
+                    <li key={i} className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-[var(--accent)]/15 border border-[var(--accent)]/30 flex items-center justify-center text-xs font-bold text-[var(--accent)]">{u[0]}</div>
+                      <span className="text-sm text-[var(--foreground)]">{u}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

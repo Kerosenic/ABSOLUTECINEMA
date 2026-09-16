@@ -42,20 +42,38 @@ export async function signInEmail(email: string, password: string): Promise<Sess
   return profile ? { user: profile } : null;
 }
 
-export async function signUpEmail(email: string, password: string, username: string): Promise<Session | null> {
-  if (!isSupabaseConfigured) return { user: MOCK_USER };
+function assertTsinglan(email: string): void {
   const domain = email.split("@")[1]?.toLowerCase();
   if (domain !== "tsinglan.org") throw new Error("Sign up is restricted to @tsinglan.org email addresses");
+}
+
+/** Invoke an Edge Function and surface its JSON `error` as a thrown Error. */
+async function invoke(name: string, body: Record<string, unknown>): Promise<any> {
   const sb = requireSupabase();
-  const { error } = await sb.auth.signUp({
-    email,
-    password,
-    options: { data: { username }, emailRedirectTo: window.location.origin },
-  });
-  if (error) throw error;
-  // Email confirmation is on, so no session yet — Supabase sends a verification
-  // email to the address; the user clicks the link, then signs in.
-  return null;
+  const { data, error } = await sb.functions.invoke(name, { body: body as Record<string, unknown> });
+  if (error) {
+    let msg = "Request failed";
+    try {
+      const ctx = await (error as any).context?.json();
+      msg = ctx?.error || msg;
+    } catch {
+      /* no JSON context */
+    }
+    throw new Error(msg);
+  }
+  return data;
+}
+
+export async function sendSignupCode(email: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  assertTsinglan(email);
+  await invoke("send-code", { email });
+}
+
+export async function verifySignup(email: string, password: string, username: string, code: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  assertTsinglan(email);
+  await invoke("verify-signup", { email, password, username, code });
 }
 
 export async function signOut(): Promise<void> {

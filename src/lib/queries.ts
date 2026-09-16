@@ -49,11 +49,9 @@ export function useAuth() {
       if (s) setSession(s);
       return s;
     },
-    signUp: async (email: string, password: string, username: string) => {
-      const s = await api.signUpEmail(email, password, username);
-      if (s) setSession(s);
-      return s;
-    },
+    sendSignupCode: (email: string) => api.sendSignupCode(email),
+    verifySignup: (email: string, password: string, username: string, code: string) =>
+      api.verifySignup(email, password, username, code),
     signOut: async () => {
       await api.signOut();
       setSession(null);
