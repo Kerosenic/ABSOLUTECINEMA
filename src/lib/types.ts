@@ -73,6 +73,7 @@ export interface Poll {
   question: string;
   closes: string;
   status: "open" | "closed";
+  multiple: boolean;
   options: PollOption[];
 }
 

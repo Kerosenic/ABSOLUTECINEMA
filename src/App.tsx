@@ -25,6 +25,7 @@ import {
   fmtCloses,
   fmtDate,
   MONTH_NAMES,
+  fullNameFromEmail,
 } from "./lib/format"
 
 import {
@@ -54,6 +55,8 @@ import {
   useMembers,
   useVault,
   useFollowing,
+  useVaultOf,
+  useFollowingOf,
   useMyReviewVotes,
   useMyPollVotes,
   useCreateReview,
@@ -333,7 +336,7 @@ function Avt({
       className={`${s} rounded-full bg-gradient-to-br ${bg} flex items-center justify-center font-display font-bold text-[var(--accent-foreground)] flex-shrink-0 overflow-hidden`}
     >
       {src ? (
-        <img src={src} alt="" className="w-full h-full object-cover" />
+        <img src={src} alt="" loading="lazy" decoding="async" className="w-full h-full object-cover" />
       ) : (
         text
       )}
@@ -1189,6 +1192,8 @@ function HeroBanner({
             key={i}
             src={src}
             alt=""
+            loading={i === activeIdx ? "eager" : "lazy"}
+            decoding="async"
             className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${
               i === activeIdx ? "opacity-100" : "opacity-0"
             }`}
@@ -1871,6 +1876,8 @@ function MovieReviewsModal({
           <img
             src={movie.poster}
             alt={movie.title}
+            loading="lazy"
+            decoding="async"
             onError={(e) => {
               e.currentTarget.style.opacity = "0"
             }}
@@ -2124,6 +2131,8 @@ function WriteReviewModal({
                       <img
                         src={m.poster}
                         alt=""
+                        loading="lazy"
+                        decoding="async"
                         className="w-8 h-11 object-cover rounded"
                       />
                       <span className="flex-1">
@@ -2316,21 +2325,27 @@ function PollCard({
   onVote,
 }: {
   poll: Poll
-  myVote: number | null
-  onVote: (pollId: string, idx: number) => void
+  myVote: number[]
+  onVote: (pollId: string, idx: number, multiple: boolean) => void
 }) {
   const closed = poll.status === "closed"
 
-  const optVotes = poll.options.map((o, i) => o.votes + (myVote === i ? 1 : 0))
+  const hasVoted = myVote.length > 0
+
+  const optVotes = poll.options.map((o, i) => o.votes + (myVote.includes(i) ? 1 : 0))
 
   const total = optVotes.reduce((a, b) => a + b, 0)
 
   const maxVotes = Math.max(...optVotes)
 
-  const castVote = (i: number) => {
-    if (myVote !== null || closed) return
+  const showResults = closed || hasVoted
 
-    onVote(poll.id, i)
+  const castVote = (i: number) => {
+    if (closed) return
+
+    if (!poll.multiple && hasVoted) return
+
+    onVote(poll.id, i, poll.multiple)
   }
 
   return (
@@ -2342,7 +2357,7 @@ function PollCard({
       <div className="flex items-start justify-between gap-4 mb-5">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--accent)] mb-1">
-            Admin Poll
+            Admin Poll{poll.multiple ? " · Multiple choice" : ""}
           </p>
           <h3 className="font-display font-800 text-xl text-[var(--foreground)] leading-tight">
             {poll.question}
@@ -2368,25 +2383,25 @@ function PollCard({
         {poll.options.map((opt, i) => {
           const pct = total > 0 ? Math.round((optVotes[i] / total) * 100) : 0
 
-          const isWinner = myVote !== null && optVotes[i] === maxVotes
+          const isWinner = showResults && total > 0 && optVotes[i] === maxVotes
 
-          const isVoted = myVote === i
+          const isVoted = myVote.includes(i)
 
           return (
             <button
               key={opt.id}
               onClick={() => castVote(i)}
-              disabled={myVote !== null || closed}
+              disabled={closed || (!poll.multiple && hasVoted)}
               aria-pressed={isVoted}
               className={`relative w-full text-left rounded-xl overflow-hidden border transition-all duration-200 ${
                 isVoted
                   ? "border-[var(--accent)] bg-[var(--accent)]/5"
-                  : myVote !== null || closed
+                  : closed || (!poll.multiple && hasVoted)
                     ? "border-[var(--border)] cursor-default"
                     : "border-[var(--border)] hover:border-[var(--accent)]/50 hover:bg-[var(--muted)]"
               }`}
             >
-              {myVote !== null && (
+              {showResults && (
                 <div
                   className={`absolute inset-y-0 left-0 transition-all duration-700 ease-out rounded-xl ${
                     isWinner ? "bg-[var(--accent)]/15" : "bg-[var(--muted)]"
@@ -2396,28 +2411,41 @@ function PollCard({
               )}
               <div className="relative flex items-center gap-3 px-4 py-3">
                 <div
-                  className={`w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+                  className={`w-4 h-4 flex-shrink-0 flex items-center justify-center border-2 transition-colors ${
+                    poll.multiple ? "rounded-md" : "rounded-full"
+                  } ${
                     isVoted
                       ? "border-[var(--accent)] bg-[var(--accent)]"
                       : "border-[var(--border)]"
                   }`}
                 >
-                  {isVoted && (
-                    <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent-foreground)]" />
-                  )}
+                  {isVoted &&
+                    (poll.multiple ? (
+                      <svg
+                        className="w-2.5 h-2.5 text-[var(--accent-foreground)]"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={3}
+                        viewBox="0 0 24 24"
+                      >
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    ) : (
+                      <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent-foreground)]" />
+                    ))}
                 </div>
                 <span
                   className={`text-sm flex-1 font-medium ${
                     isVoted
                       ? "text-[var(--accent)]"
-                      : isWinner && myVote !== null
+                      : isWinner && showResults
                         ? "text-[var(--foreground)] font-bold"
                         : "text-[var(--foreground)]"
                   }`}
                 >
                   {opt.label}
                 </span>
-                {myVote !== null && (
+                {showResults && (
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs font-bold tabular-nums text-[var(--muted-foreground)]">
                       {pct}%
@@ -2442,9 +2470,13 @@ function PollCard({
         {total.toLocaleString()} votes ·{" "}
         {closed
           ? "Voting closed"
-          : myVote === null
-            ? "Cast your vote"
-            : "Results shown"}
+          : hasVoted
+            ? poll.multiple
+              ? "Tap to change your picks"
+              : "Results shown"
+            : poll.multiple
+              ? "Select one or more"
+              : "Cast your vote"}
       </p>
     </div>
   )
@@ -2605,8 +2637,8 @@ function HomePage({
   onReply: (id: string, body: string) => void
 
   polls: Poll[]
-  pollVotes: Record<string, number>
-  onPollVote: (pollId: string, idx: number) => void
+  pollVotes: Record<string, number[]>
+  onPollVote: (pollId: string, idx: number, multiple: boolean) => void
 
   vault: Vault
   ratings: MovieRating[]
@@ -2642,6 +2674,8 @@ function HomePage({
 
   const [reviewQuery, setReviewQuery] = useState("")
 
+  const [reviewVisibleCount, setReviewVisibleCount] = useState(50)
+
   const [visibleCount, setVisibleCount] = useState(50)
 
   // Reset pagination whenever filters/search change so "Show more" starts fresh.
@@ -2649,6 +2683,10 @@ function HomePage({
   useEffect(() => {
     setVisibleCount(50)
   }, [genre, year, rating, query])
+
+  useEffect(() => {
+    setReviewVisibleCount(50)
+  }, [reviewQuery])
 
   const filtered = movies.filter((m) => {
     if (genre !== "All" && m.genre !== genre) return false
@@ -2854,7 +2892,7 @@ function HomePage({
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredReviews.map((r) => (
+          {filteredReviews.slice(0, reviewVisibleCount).map((r) => (
             <ReviewCard
               key={r.id}
               review={r}
@@ -2868,6 +2906,19 @@ function HomePage({
             />
           ))}
         </div>
+        {filteredReviews.length > reviewVisibleCount && (
+          <div className="mt-8 text-center">
+            <button
+              onClick={() => setReviewVisibleCount((c) => c + 50)}
+              className="btn-parallelogram inline-flex items-center gap-2 px-6 py-2.5 bg-[var(--accent)] text-black text-sm font-bold hover:opacity-90 transition-opacity"
+            >
+              Show More Reviews
+              <span className="text-xs font-bold opacity-70">
+                ({filteredReviews.length - reviewVisibleCount} more)
+              </span>
+            </button>
+          </div>
+        )}
         {showSearchReviews &&
           reviewQuery.trim() &&
           filteredReviews.length === 0 && (
@@ -2889,7 +2940,7 @@ function HomePage({
               <PollCard
                 key={p.id}
                 poll={p}
-                myVote={pollVotes[p.id] ?? null}
+                myVote={pollVotes[p.id] ?? []}
                 onVote={onPollVote}
               />
             ))}
@@ -3583,6 +3634,247 @@ function LeaderboardPage({ leaderboard }: { leaderboard: LeaderboardRow[] }) {
   )
 }
 
+// ─── Member Profile Page (viewing another member) ────────────────────────────
+
+function MemberProfilePage({
+  member,
+  reviews,
+  ratings,
+  movies,
+  vault,
+  followingCount,
+  onBack,
+}: {
+  member: Profile
+  reviews: Review[]
+  ratings: MovieRating[]
+  movies: Movie[]
+  vault: Vault
+  followingCount: number
+  onBack: () => void
+}) {
+  const [tab, setTab] = useState<VaultTab>("watched")
+
+  const username = member.username
+
+  const email = member.email ?? ""
+
+  const displayName = fullNameFromEmail(email) || username
+
+  const netUpvotes = reviews.reduce((a, r) => a + r.upvotes - r.downvotes, 0)
+
+  const vaultCount = vault.watched.length + vault.plantowatch.length + vault.favorites.length
+
+  const vaultMovies = vault[tab]
+    .map((id) => movies.find((m) => m.id === id))
+    .filter((m): m is Movie => Boolean(m))
+
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-16">
+      <button
+        onClick={onBack}
+        className="mb-4 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors"
+      >
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+        </svg>
+        Back to my profile
+      </button>
+
+      {/* Banner */}
+      <div className="relative h-44 rounded-2xl overflow-hidden mb-4 bg-[var(--muted)]">
+        <img
+          src="https://images.unsplash.com/photo-1524985069026-dd778a71c7b4?w=1400&h=300&fit=crop&auto=format"
+          alt="Profile banner"
+          loading="lazy"
+          decoding="async"
+          className="w-full h-full object-cover opacity-50"
+        />
+        <div className="absolute inset-0 bg-gradient-to-r from-[var(--background)]/70 to-transparent" />
+      </div>
+
+      {/* Profile header */}
+      <div className="flex flex-col sm:flex-row sm:items-end gap-4 mb-8 -mt-8 px-2">
+        <div className="relative w-20 h-20 flex-shrink-0">
+          <div className="w-20 h-20 rounded-2xl bg-gradient-to-br from-[var(--accent)] to-[var(--primary)] flex items-center justify-center border-4 border-[var(--background)] shadow-xl overflow-hidden">
+            {member.avatar_url ? (
+              <img src={member.avatar_url} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <span className="font-display font-900 text-2xl text-[var(--accent-foreground)]">
+                {initials(username)}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-center gap-2 mb-1">
+            <h1 className="font-display font-900 text-3xl sm:text-4xl text-[var(--foreground)]">
+              {displayName}
+            </h1>
+            <Badge label={badgeFor(reviews.length)} />
+          </div>
+          <p className="text-sm text-[var(--muted-foreground)]">
+            @{username}
+            {email ? ` · ${email}` : ""}
+          </p>
+        </div>
+      </div>
+
+      {/* Stats row */}
+      <div className="grid grid-cols-4 gap-3 mb-10">
+        {[
+          { label: "Reviews", val: String(reviews.length) },
+          { label: "Upvotes", val: netUpvotes.toLocaleString() },
+          { label: "Following", val: String(followingCount) },
+          { label: "Vault", val: String(vaultCount) },
+        ].map(({ label, val }) => (
+          <div
+            key={label}
+            className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-3 sm:p-4 text-center hover:border-[var(--accent)]/30 transition-colors"
+          >
+            <p className="font-display font-900 text-2xl sm:text-3xl text-[var(--foreground)]">
+              {val}
+            </p>
+            <p className="text-xs text-[var(--muted-foreground)] mt-0.5">{label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        {/* Cinema Vault */}
+        <div className="lg:col-span-2">
+          <div className="flex items-center gap-2 mb-5">
+            <svg className="w-5 h-5 text-[var(--accent)]" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M4 3a2 2 0 100 4h12a2 2 0 100-4H4z" />
+              <path
+                fillRule="evenodd"
+                d="M3 8h14v7a2 2 0 01-2 2H5a2 2 0 01-2-2V8zm5 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z"
+                clipRule="evenodd"
+              />
+            </svg>
+            <h2 className="font-display font-900 text-2xl text-[var(--foreground)]">
+              PROFILE
+            </h2>
+          </div>
+
+          <div className="flex gap-1 mb-5 p-1 bg-[var(--muted)] rounded-full w-fit border border-[var(--border)]">
+            {(["watched", "plantowatch", "favorites"] as VaultTab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`px-4 py-1.5 rounded-full text-sm font-semibold transition-all ${
+                  tab === t
+                    ? "bg-[var(--card)] text-[var(--foreground)] shadow-sm border border-[var(--border)]"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                {t === "watched"
+                  ? "Watched"
+                  : t === "plantowatch"
+                    ? "Plan to Watch"
+                    : "★ Favorites"}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-8">
+            {vaultMovies.map((m) => {
+              const { avg } = avgRating(reviews, ratings, m.id)
+              return (
+                <div
+                  key={m.id}
+                  className="aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] relative group"
+                >
+                  <img
+                    src={m.poster}
+                    alt={m.title}
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      e.currentTarget.style.opacity = "0"
+                    }}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                  <div className="absolute inset-x-0 bottom-0 p-2.5">
+                    <p className="text-white text-xs font-bold leading-tight">{m.title}</p>
+                    <span
+                      className={`text-xs font-bold ${
+                        avg === null ? "text-white/60" : "text-[var(--star)]"
+                      }`}
+                    >
+                      {avg === null ? "N/A" : `★ ${avg.toFixed(1)}`}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+            {vaultMovies.length === 0 && (
+              <p className="text-sm text-[var(--muted-foreground)] col-span-full py-8 text-center">
+                Nothing here yet.
+              </p>
+            )}
+          </div>
+
+          {/* Recent Reviews */}
+          <h2 className="font-display font-900 text-2xl text-[var(--foreground)] mb-4">
+            RECENT REVIEWS
+          </h2>
+          <div className="flex flex-col gap-3">
+            {reviews.slice(0, 3).map((r) => {
+              const m = movies.find((mv) => mv.id === r.movie_id)
+              if (!m) return null
+              return (
+                <div
+                  key={r.id}
+                  className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-4 flex gap-3 hover:border-[var(--accent)]/30 transition-colors"
+                >
+                  <img
+                    src={m.poster}
+                    alt={m.title}
+                    loading="lazy"
+                    decoding="async"
+                    onError={(e) => {
+                      e.currentTarget.style.opacity = "0"
+                    }}
+                    className="w-12 h-[68px] object-cover rounded-lg flex-shrink-0 bg-[var(--muted)]"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <p className="font-display font-700 text-sm text-[var(--foreground)] truncate">
+                          {m.title}
+                        </p>
+                        <p className="text-[10px] text-[var(--muted-foreground)]">{m.year}</p>
+                      </div>
+                      <div className="flex items-center gap-1 flex-shrink-0">
+                        <StarRating rating={r.rating} />
+                        <span className="text-xs font-bold text-[var(--accent)]">{r.rating}</span>
+                      </div>
+                    </div>
+                    <p className="text-xs text-[var(--secondary-foreground)] line-clamp-2 leading-relaxed">
+                      {r.body}
+                    </p>
+                    <div className="flex items-center gap-3 mt-2 text-xs text-[var(--muted-foreground)]">
+                      <span>{timeAgo(r.created_at)}</span>
+                      <span>↑ {r.upvotes}</span>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+            {reviews.length === 0 && (
+              <p className="text-sm text-[var(--muted-foreground)] py-8 text-center">
+                No reviews yet.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Profile Page ─────────────────────────────────────────────────────────────
 
 function ProfilePage({
@@ -3600,6 +3892,7 @@ function ProfilePage({
   session,
   onUploadAvatar,
   onUpdateUsername,
+  onViewProfile,
 }: {
   movies: Movie[]
   reviews: Review[]
@@ -3615,6 +3908,7 @@ function ProfilePage({
   session: Session | null
   onUploadAvatar: (file: File) => void
   onUpdateUsername: (username: string) => void
+  onViewProfile: (id: string) => void
 }) {
   const [tab, setTab] = useState<VaultTab>("watched")
 
@@ -3645,7 +3939,7 @@ function ProfilePage({
   const email = session?.user.email ?? ""
 
   // Extract full name from email: firstname.lastname_number@tsinglan.org
-  const extractFullName = (email: string): string => {
+  const extractFullName = (email: string | null | undefined): string => {
     if (!email) return ""
     const localPart = email.split("@")[0]
     // Remove trailing _number pattern
@@ -3693,6 +3987,8 @@ function ProfilePage({
         <img
           src="https://images.unsplash.com/photo-1524985069026-dd778a71c7b4?w=1400&h=300&fit=crop&auto=format"
           alt="Profile banner"
+          loading="lazy"
+          decoding="async"
           className="w-full h-full object-cover opacity-50"
         />
         <div className="absolute inset-0 bg-gradient-to-r from-[var(--background)]/70 to-transparent" />
@@ -3994,32 +4290,49 @@ function ProfilePage({
               />
             </div>
             <div className="flex flex-col gap-2">
-              {filteredMembers.slice(0, 6).map((f) => (
-                <div
-                  key={f.id}
-                  className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-3 flex items-center gap-2.5 hover:border-[var(--accent)]/30 transition-colors"
-                >
-                  <Avt initials={initials(f.username)} size="xs" />
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-[var(--foreground)] truncate">
-                      {f.username}
-                    </p>
-                    <p className="text-[10px] text-[var(--muted-foreground)]">
-                      {f.role}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => onToggleFollow(f.id, f.username)}
-                    className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
-                      following.includes(f.id)
-                        ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30"
-                        : "border border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
-                    }`}
+              {filteredMembers.slice(0, 6).map((f) => {
+                const realName = extractFullName(f.email)
+                return (
+                  <div
+                    key={f.id}
+                    className="bg-[var(--card)] border border-[var(--border)] rounded-xl p-3 flex items-center gap-2.5 hover:border-[var(--accent)]/30 transition-colors"
                   >
-                    {following.includes(f.id) ? "Following" : "Follow"}
-                  </button>
-                </div>
-              ))}
+                    <Avt initials={initials(f.username)} size="xs" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-[var(--foreground)] truncate">
+                        {f.username}
+                        {realName && (
+                          <span className="text-[var(--muted-foreground)] font-normal">
+                            {" "}
+                            ({realName})
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[10px] text-[var(--muted-foreground)]">
+                        {f.role}
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-1.5 items-stretch flex-shrink-0">
+                      <button
+                        onClick={() => onToggleFollow(f.id, f.username)}
+                        className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${
+                          following.includes(f.id)
+                            ? "bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/30"
+                            : "border border-[var(--border)] text-[var(--muted-foreground)] hover:border-[var(--accent)] hover:text-[var(--accent)]"
+                        }`}
+                      >
+                        {following.includes(f.id) ? "Following" : "Follow"}
+                      </button>
+                      <button
+                        onClick={() => onViewProfile(f.id)}
+                        className="px-3 py-1 rounded-full text-xs font-bold border border-[var(--border)] text-[var(--foreground)] hover:border-[var(--accent)] hover:text-[var(--accent)] transition-colors"
+                      >
+                        View Profile
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 
@@ -4213,7 +4526,7 @@ function AdminPage({
   onToggleScreeningFeatured: (id: string) => void
 
   polls: Poll[]
-  onAddPoll: (question: string, closes: string, options: string[]) => void
+  onAddPoll: (question: string, closes: string, options: string[], multiple: boolean) => void
   onTogglePoll: (id: string) => void
   onDeletePoll: (id: string) => void
 
@@ -4281,6 +4594,8 @@ function AdminPage({
   const [pCloses, setPCloses] = useState("")
 
   const [pOptions, setPOptions] = useState(["", ""])
+
+  const [pMultiple, setPMultiple] = useState(false)
 
   // Movie form
 
@@ -4368,6 +4683,7 @@ function AdminPage({
     const { data, errors } = parseForm(pollSchema, {
       question: pQuestion,
       closes: pCloses,
+      multiple: pMultiple,
       options: pOptions,
     })
 
@@ -4375,11 +4691,12 @@ function AdminPage({
 
     if (Object.keys(errors).length) return
 
-    onAddPoll(data.question, data.closes || "TBD", data.options)
+    onAddPoll(data.question, data.closes || "TBD", data.options, data.multiple)
 
     setPQuestion("")
     setPCloses("")
     setPOptions(["", ""])
+    setPMultiple(false)
   }
 
   const setOpt = (i: number, v: string) => {
@@ -4627,6 +4944,30 @@ function AdminPage({
               onChange={(e) => setPCloses(e.target.value)}
               className={inputCls}
             />
+            <div className="flex rounded-lg overflow-hidden border border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => setPMultiple(false)}
+                className={`flex-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                  !pMultiple
+                    ? "bg-[var(--accent)] text-black"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                Single select
+              </button>
+              <button
+                type="button"
+                onClick={() => setPMultiple(true)}
+                className={`flex-1 px-3 py-2 text-xs font-semibold transition-colors ${
+                  pMultiple
+                    ? "bg-[var(--accent)] text-black"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+                }`}
+              >
+                Multiple select
+              </button>
+            </div>
             {pOptions.map((o, i) => (
               <div key={i} className="flex gap-2">
                 <input
@@ -5282,6 +5623,8 @@ function Footer({ setPage }: { setPage: (p: Page) => void }) {
 export default function App() {
   const [page, setPage] = useState<Page>("home")
 
+  const [viewingId, setViewingId] = useState<string | null>(null)
+
   const [showSignIn, setShowSignIn] = useState(false)
 
   const { toasts, push } = useToast()
@@ -5301,7 +5644,7 @@ export default function App() {
 
   const movies = useMovies()
 
-  const deletedMovies = useDeletedMovies()
+  const deletedMovies = useDeletedMovies(page === "admin")
 
   const reviews = useReviews()
 
@@ -5311,13 +5654,17 @@ export default function App() {
 
   const screenings = useScreenings()
 
-  const leaderboard = useLeaderboard()
+  const leaderboard = useLeaderboard(page === "leaderboard")
 
-  const members = useMembers()
+  const members = useMembers(page === "profile" || page === "admin")
 
   const vault = useVault()
 
   const following = useFollowing()
+
+  const viewedVault = useVaultOf(viewingId ?? "")
+
+  const viewedFollowing = useFollowingOf(viewingId ?? "")
 
   const userVotes = useMyReviewVotes()
 
@@ -5377,7 +5724,10 @@ export default function App() {
 
   const deleteAccount = useDeleteAccount()
 
-  const setPageSafe = useCallback((p: Page) => setPage(p), [])
+  const setPageSafe = useCallback((p: Page) => {
+    setViewingId(null)
+    setPage(p)
+  }, [])
 
   const moviesData = movies.data ?? []
 
@@ -5413,18 +5763,41 @@ export default function App() {
 
   const followingData = following.data ?? []
 
+  const viewedUser = viewingId ? (membersData.find((m) => m.id === viewingId) ?? null) : null
+
+  const viewedVaultData = viewedVault.data ?? {
+    watched: [],
+    plantowatch: [],
+    favorites: [],
+  }
+
+  const viewedFollowingData = viewedFollowing.data ?? []
+
+  const viewedReviews = viewingId ? reviewsData.filter((r) => r.author_id === viewingId) : []
+
+  const viewedRatings = viewingId ? movieRatingsData.filter((r) => r.user_id === viewingId) : []
+
   const userVotesData = userVotes.data ?? {}
 
   const pollVotesData = pollVotes.data ?? {}
 
   const announcementsData = announcements.data ?? []
 
+  const [forceReady, setForceReady] = useState(false)
+
+  useEffect(() => {
+    const t = setTimeout(() => setForceReady(true), 3500)
+
+    return () => clearTimeout(t)
+  }, [])
+
   const loading =
-    movies.isLoading ||
-    reviews.isLoading ||
-    screenings.isLoading ||
-    polls.isLoading ||
-    announcements.isLoading
+    !forceReady &&
+    (movies.isLoading ||
+      reviews.isLoading ||
+      screenings.isLoading ||
+      polls.isLoading ||
+      announcements.isLoading)
 
   const onVote = (id: string, dir: "up" | "down") => {
     voteReview.mutate({ id, dir })
@@ -5446,8 +5819,8 @@ export default function App() {
     })
   }
 
-  const onPollVote = (pollId: string, idx: number) => {
-    castPollVote.mutate({ pollId, optionIndex: idx }, {
+  const onPollVote = (pollId: string, idx: number, multiple: boolean) => {
+    castPollVote.mutate({ pollId, optionIndex: idx, multiple }, {
       onSuccess: () => push("Vote cast!"),
     })
   }
@@ -5484,8 +5857,8 @@ export default function App() {
     })
   }
 
-  const onAddPoll = (question: string, closes: string, options: string[]) => {
-    addPoll.mutate({ question, closes, options }, {
+  const onAddPoll = (question: string, closes: string, options: string[], multiple: boolean) => {
+    addPoll.mutate({ question, closes, options, multiple }, {
       onSuccess: () => push("Poll created"),
     })
   }
@@ -5664,24 +6037,39 @@ export default function App() {
             {page === "leaderboard" && (
               <LeaderboardPage leaderboard={leaderboardData} />
             )}
-            {page === "profile" && (
-              <ProfilePage
-                movies={moviesData}
-                reviews={reviewsData}
-                ratings={movieRatingsData}
-                myRatings={myRatings}
-                vault={vaultData}
-                members={membersData}
-                following={followingData}
-                onToggleFollow={onToggleFollow}
-                onToggleVault={onToggleVault}
-                onRate={onRate}
-                onWriteReview={onWriteReview}
-                session={session}
-                onUploadAvatar={onUploadAvatar}
-                onUpdateUsername={onUpdateUsername}
-              />
-            )}
+            {page === "profile" &&
+              (viewedUser ? (
+                <MemberProfilePage
+                  member={viewedUser}
+                  reviews={viewedReviews}
+                  ratings={viewedRatings}
+                  movies={moviesData}
+                  vault={viewedVaultData}
+                  followingCount={viewedFollowingData.length}
+                  onBack={() => setViewingId(null)}
+                />
+              ) : (
+                <ProfilePage
+                  movies={moviesData}
+                  reviews={reviewsData}
+                  ratings={movieRatingsData}
+                  myRatings={myRatings}
+                  vault={vaultData}
+                  members={membersData}
+                  following={followingData}
+                  onToggleFollow={onToggleFollow}
+                  onToggleVault={onToggleVault}
+                  onRate={onRate}
+                  onWriteReview={onWriteReview}
+                  session={session}
+                  onUploadAvatar={onUploadAvatar}
+                  onUpdateUsername={onUpdateUsername}
+                  onViewProfile={(id) => {
+                    setViewingId(id)
+                    setPage("profile")
+                  }}
+                />
+              ))}
             {page === "admin" &&
               (adminUnlocked && session ? (
                 <AdminPage

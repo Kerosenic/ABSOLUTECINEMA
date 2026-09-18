@@ -21,6 +21,7 @@ export const reviewSchema = z.object({
 export const pollSchema = z.object({
   question: z.string().trim().min(3, "Poll question is too short"),
   closes: z.string(),
+  multiple: z.boolean().default(false),
   options: z
     .array(z.string().trim().min(1, "Option can't be blank"))
     .min(2, "Add at least 2 options")

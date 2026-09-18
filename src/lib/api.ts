@@ -190,6 +190,7 @@ export async function listPolls(): Promise<Poll[]> {
     question: p.title,
     closes: p.expires_at ? p.expires_at.slice(0, 10) : "TBD",
     status: p.status === "open" ? "open" : "closed",
+    multiple: p.multiple ?? false,
     options: (options ?? []).filter((o: any) => o.poll_id === p.id)
       .map((o: any) => ({ id: o.id, label: o.title, votes: tally.get(o.id) ?? 0 })),
   }));
@@ -215,8 +216,8 @@ export async function getLeaderboard(): Promise<LeaderboardRow[]> {
 export async function listMembers(): Promise<Profile[]> {
   if (!isSupabaseConfigured) return mockMembers();
   const sb = requireSupabase();
-  const { data } = await sb.from("profiles").select("id, username, role").order("username");
-  return (data ?? []).map((p: any) => ({ id: p.id, username: p.username, role: p.role }));
+  const { data } = await sb.from("profiles").select("id, username, role, email").order("username");
+  return (data ?? []).map((p: any) => ({ id: p.id, username: p.username, role: p.role, email: p.email ?? null }));
 }
 
 export async function getVault(userId: string): Promise<Vault> {
@@ -248,7 +249,7 @@ export async function getMyReviewVotes(userId: string): Promise<Record<string, "
   return out;
 }
 
-export async function getMyPollVotes(userId: string): Promise<Record<string, number>> {
+export async function getMyPollVotes(userId: string): Promise<Record<string, number[]>> {
   if (!isSupabaseConfigured) return mockPollVotes();
   const sb = requireSupabase();
   const [{ data: votes }, { data: options }] = await Promise.all([
@@ -257,10 +258,10 @@ export async function getMyPollVotes(userId: string): Promise<Record<string, num
   ]);
   const byPoll: Record<string, string[]> = {};
   for (const o of options ?? []) (byPoll[o.poll_id] ??= []).push(o.id);
-  const out: Record<string, number> = {};
+  const out: Record<string, number[]> = {};
   for (const v of votes ?? []) {
     const idx = (byPoll[v.poll_id] ?? []).indexOf(v.option_id);
-    if (idx >= 0) out[v.poll_id] = idx;
+    if (idx >= 0) (out[v.poll_id] ??= []).push(idx);
   }
   return out;
 }
@@ -344,8 +345,8 @@ export async function addReply(reviewId: string, body: string): Promise<void> {
   await sb.from("comments").insert({ review_id: reviewId, author_id: uid, body });
 }
 
-export async function castPollVote(pollId: string, optionIndex: number): Promise<void> {
-  if (!isSupabaseConfigured) return mockCastPollVote(pollId, optionIndex);
+export async function castPollVote(pollId: string, optionIndex: number, multiple: boolean): Promise<void> {
+  if (!isSupabaseConfigured) return mockCastPollVote(pollId, optionIndex, multiple);
   const sb = requireSupabase();
   const uid = await currentUserId();
   if (!uid) return;
@@ -353,8 +354,18 @@ export async function castPollVote(pollId: string, optionIndex: number): Promise
     .select("id").eq("poll_id", pollId).order("position", { ascending: true });
   const option = (options ?? [])[optionIndex];
   if (!option) return;
-  await sb.from("poll_votes")
-    .upsert({ poll_id: pollId, option_id: option.id, user_id: uid }, { onConflict: "poll_id,user_id" });
+  if (!multiple) {
+    await sb.from("poll_votes").delete().eq("poll_id", pollId).eq("user_id", uid);
+    await sb.from("poll_votes").insert({ poll_id: pollId, option_id: option.id, user_id: uid });
+    return;
+  }
+  const { data: existing } = await sb.from("poll_votes")
+    .select("id").eq("poll_id", pollId).eq("option_id", option.id).eq("user_id", uid).maybeSingle();
+  if (existing) {
+    await sb.from("poll_votes").delete().eq("id", existing.id);
+  } else {
+    await sb.from("poll_votes").insert({ poll_id: pollId, option_id: option.id, user_id: uid });
+  }
 }
 
 export async function toggleFavorite(movieId: string): Promise<void> {
@@ -436,12 +447,12 @@ export async function toggleScreeningFeatured(id: string): Promise<void> {
   await sb.from("screenings").update({ featured: !(data?.featured ?? false) }).eq("id", id);
 }
 
-export async function addPoll(input: { question: string; closes: string; options: string[] }): Promise<void> {
+export async function addPoll(input: { question: string; closes: string; options: string[]; multiple: boolean }): Promise<void> {
   if (!isSupabaseConfigured) { mockAddPoll(input); return; }
   const sb = requireSupabase();
   const uid = await currentUserId();
   const { data: poll } = await sb.from("polls")
-    .insert({ title: input.question, status: "open", expires_at: input.closes ? `${input.closes}T23:59:59Z` : null, created_by: uid ?? null })
+    .insert({ title: input.question, status: "open", expires_at: input.closes ? `${input.closes}T23:59:59Z` : null, multiple: input.multiple, created_by: uid ?? null })
     .select("id").single();
   if (!poll) throw new Error("Failed to create poll");
   const rows = input.options.map((label, i) => ({ poll_id: poll.id, title: label, position: i }));

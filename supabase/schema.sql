@@ -12,6 +12,13 @@ create table if not exists public.profiles (
   role text not null default 'member' check (role in ('member', 'admin')),
   created_at timestamptz not null default now()
 );
+alter table public.profiles add column if not exists email text;
+
+-- Backfill email for existing profiles from auth.users.
+update public.profiles p
+set email = u.email
+from auth.users u
+where p.id = u.id and p.email is null;
 
 -- ─── Helpers ─────────────────────────────────────────────────────────────
 create or replace function public.is_admin()
@@ -90,8 +97,10 @@ create table if not exists public.polls (
   created_by uuid references public.profiles(id) on delete set null,
   expires_at timestamptz,
   status text not null default 'open' check (status in ('open', 'closed')),
+  multiple boolean not null default false,
   created_at timestamptz not null default now()
 );
+alter table public.polls add column if not exists multiple boolean not null default false;
 
 -- ─── poll_options ───────────────────────────────────────────────────────
 create table if not exists public.poll_options (
@@ -110,8 +119,12 @@ create table if not exists public.poll_votes (
   option_id uuid not null references public.poll_options(id) on delete cascade,
   user_id uuid not null references public.profiles(id) on delete cascade,
   created_at timestamptz not null default now(),
-  unique (poll_id, user_id)
+  unique (poll_id, option_id, user_id)
 );
+-- Migrate legacy single-select unique (poll_id, user_id) -> per-option multi-select.
+alter table public.poll_votes drop constraint if exists poll_votes_poll_id_user_id_key;
+alter table public.poll_votes drop constraint if exists poll_votes_poll_id_option_id_user_id_key;
+alter table public.poll_votes add constraint poll_votes_poll_id_option_id_user_id_key unique (poll_id, option_id, user_id);
 
 -- ─── screenings ─────────────────────────────────────────────────────────
 create table if not exists public.screenings (
@@ -359,12 +372,13 @@ returns trigger
 language plpgsql security definer set search_path = public
 as $$
 begin
-  insert into public.profiles (id, username, avatar_url, role)
+  insert into public.profiles (id, username, avatar_url, role, email)
   values (
     new.id,
     coalesce(new.raw_user_meta_data->>'username', split_part(coalesce(new.email, 'member'), '@', 1)),
     new.raw_user_meta_data->>'avatar_url',
-    'member'
+    'member',
+    new.email
   )
   on conflict (id) do nothing;
   return new;

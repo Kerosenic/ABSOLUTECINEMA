@@ -40,6 +40,17 @@ export function timeAgo(iso: string): string {
   return `${Math.floor(mo / 12)}y ago`;
 }
 
+/** Real-life name from a @tsinglan.org email, e.g. "first.last_3@tsinglan.org" -> "First Last". */
+export function fullNameFromEmail(email: string | null | undefined): string {
+  if (!email) return "";
+  const local = email.split("@")[0];
+  const withoutNumber = local.replace(/_\d+$/, "");
+  return withoutNumber
+    .split(".")
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+    .join(" ");
+}
+
 /** Club rank badge derived from review count. */
 export function badgeFor(reviews: number): string {
   if (reviews >= 140) return "Auteur";

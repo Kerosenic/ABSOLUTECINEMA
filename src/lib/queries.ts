@@ -81,8 +81,8 @@ export function useMovies() {
   return useQuery({ queryKey: ["movies"], queryFn: api.listMovies });
 }
 
-export function useDeletedMovies() {
-  return useQuery({ queryKey: ["deletedMovies"], queryFn: api.listDeletedMovies });
+export function useDeletedMovies(enabled = true) {
+  return useQuery({ queryKey: ["deletedMovies"], queryFn: api.listDeletedMovies, enabled });
 }
 
 export function useReviews() {
@@ -105,12 +105,12 @@ export function useScreenings() {
   return useQuery({ queryKey: ["screenings"], queryFn: api.listScreenings });
 }
 
-export function useLeaderboard() {
-  return useQuery({ queryKey: ["leaderboard"], queryFn: api.getLeaderboard });
+export function useLeaderboard(enabled = true) {
+  return useQuery({ queryKey: ["leaderboard"], queryFn: api.getLeaderboard, enabled });
 }
 
-export function useMembers() {
-  return useQuery({ queryKey: ["members"], queryFn: api.listMembers });
+export function useMembers(enabled = true) {
+  return useQuery({ queryKey: ["members"], queryFn: api.listMembers, enabled });
 }
 
 export function useVault() {
@@ -123,6 +123,14 @@ export function useFollowing() {
   const session = useSession();
   const uid = session?.user.id ?? "";
   return useQuery({ queryKey: ["following", uid], queryFn: () => api.getFollowing(uid), enabled: !!uid });
+}
+
+export function useVaultOf(userId: string) {
+  return useQuery({ queryKey: ["vault", userId], queryFn: () => api.getVault(userId), enabled: !!userId });
+}
+
+export function useFollowingOf(userId: string) {
+  return useQuery({ queryKey: ["following", userId], queryFn: () => api.getFollowing(userId), enabled: !!userId });
 }
 
 export function useMyReviewVotes() {
@@ -229,13 +237,19 @@ export function useAddReply() {
 
 export function useCastPollVote() {
   return useOptimisticMutation(
-    (args: { pollId: string; optionIndex: number }) => api.castPollVote(args.pollId, args.optionIndex),
+    (args: { pollId: string; optionIndex: number; multiple: boolean }) =>
+      api.castPollVote(args.pollId, args.optionIndex, args.multiple),
     [["polls"], ["myPollVotes"]],
     (args, qc) => {
       const uid = getSession()?.user.id ?? "";
-      return patch<Record<string, number>>(qc, ["myPollVotes", uid], (old) => {
-        if (old[args.pollId] != null) return old;
-        return { ...old, [args.pollId]: args.optionIndex };
+      return patch<Record<string, number[]>>(qc, ["myPollVotes", uid], (old) => {
+        const cur = old[args.pollId] ?? [];
+        const next = args.multiple
+          ? cur.includes(args.optionIndex)
+            ? cur.filter((i) => i !== args.optionIndex)
+            : [...cur, args.optionIndex]
+          : [args.optionIndex];
+        return { ...old, [args.pollId]: next };
       });
     },
   );
@@ -314,7 +328,7 @@ export function useToggleScreeningFeatured() {
 
 export function useAddPoll() {
   return useOptimisticMutation(
-    (args: { question: string; closes: string; options: string[] }) => api.addPoll(args),
+    (args: { question: string; closes: string; options: string[]; multiple: boolean }) => api.addPoll(args),
     [["polls"]],
   );
 }
