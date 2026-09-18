@@ -7,7 +7,6 @@
 // Demo login: cinemavault@example.com / password123
 
 import { createClient } from "@supabase/supabase-js";
-import { readFileSync } from "node:fs";
 
 const url = process.env.SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -20,11 +19,7 @@ const sb = createClient(url, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-// Single source of truth: src/lib/mock.ts, pre-generated to JSON so plain Node
-// (no TS loader) can read it. Frontend field `poster` maps to DB column `poster_url`.
-const movies = JSON.parse(
-  readFileSync(new URL("../src/lib/movies.json", import.meta.url), "utf8"),
-).map(({ poster, ...m }) => ({ ...m, poster_url: poster }));
+import { MOVIES } from "../src/lib/mock.js";
 
 const usernames = [
   "CinemaVault", "FilmNoir88", "ReelTalk", "SunsetBoulevard", "NewWaveNick",
