@@ -22,3 +22,6 @@ logs/
 /.opencode-skills/
 supabase/.temp/
 *.bak
+
+.vercel
+.env*

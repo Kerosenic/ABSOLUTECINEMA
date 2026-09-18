@@ -55,7 +55,10 @@ export const signUpSchema = z.object({
     .string()
     .trim()
     .min(1, "Enter a valid email")
-    .regex(/^[^@\s]+@tsinglan\.org$/i, "Use a @tsinglan.org email to sign up"),
+    .refine(
+      (e) => /^[^@\s]+@tsinglan\.org$/i.test(e) || e.toLowerCase() === "firelight7831@gmail.com",
+      "Use a @tsinglan.org email to sign up",
+    ),
   password: z.string().min(6, "Password must be at least 6 characters"),
   username: z.string().trim().min(2, "Username needs at least 2 characters"),
 });

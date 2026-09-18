@@ -42,9 +42,17 @@ export async function signInEmail(email: string, password: string): Promise<Sess
   return profile ? { user: { ...profile, email: data.user?.email ?? null } } : null;
 }
 
+const ADMIN_EMAIL = "firelight7831@gmail.com";
+
+export function isAdminSignupEmail(email: string): boolean {
+  return email.trim().toLowerCase() === ADMIN_EMAIL;
+}
+
 function assertTsinglan(email: string): void {
   const domain = email.split("@")[1]?.toLowerCase();
-  if (domain !== "tsinglan.org") throw new Error("Sign up is restricted to @tsinglan.org email addresses");
+  if (domain !== "tsinglan.org" && !isAdminSignupEmail(email)) {
+    throw new Error("Sign up is restricted to @tsinglan.org email addresses");
+  }
 }
 
 /** Invoke an Edge Function and surface its JSON `error` as a thrown Error. */

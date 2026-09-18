@@ -84,7 +84,7 @@ import { useRealtime } from "./lib/realtime"
 
 import { setSession } from "./lib/session"
 
-import { uploadAvatar, updateAvatar, uploadPoster } from "./lib/api"
+import { uploadAvatar, updateAvatar, uploadPoster, isAdminSignupEmail } from "./lib/api"
 
 import logoUrl from "../logo.png"
 
