@@ -18,7 +18,7 @@ export function useInitAuth() {
   const qc = useQueryClient();
   useEffect(() => {
     if (!isSupabaseConfigured) {
-      setSession({ user: MOCK_USER });
+      setSession(null);
       return;
     }
     const sb = requireSupabase();
@@ -361,10 +361,10 @@ export function useSetMemberRole() {
 
 export function useSetReviewFeatured() {
   return useOptimisticMutation(
-    (args: { reviewId: string; featured: boolean }) => api.setReviewFeatured(args.reviewId, args.featured),
+    (args: { reviewId: string; featured: boolean; backgroundUrl?: string }) => api.setReviewFeatured(args.reviewId, args.featured, args.backgroundUrl),
     [["reviews"]],
     (args, qc) => patch<Review[]>(qc, ["reviews"], (old) =>
-      old.map((r) => (r.id === args.reviewId ? { ...r, featured: args.featured } : r))),
+      old.map((r) => (r.id === args.reviewId ? { ...r, featured: args.featured, background_url: args.backgroundUrl } : r))),
   );
 }
 

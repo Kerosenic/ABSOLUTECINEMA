@@ -36,6 +36,7 @@ export interface Review {
   downvotes: number;
   created_at: string;
   featured: boolean;
+  background_url?: string | null;
 }
 
 export interface Reply {

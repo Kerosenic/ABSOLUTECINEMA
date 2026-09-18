@@ -467,9 +467,11 @@ export async function setMemberRole(userId: string, role: "member" | "admin"): P
   await requireSupabase().from("profiles").update({ role }).eq("id", userId);
 }
 
-export async function setReviewFeatured(reviewId: string, featured: boolean): Promise<void> {
-  if (!isSupabaseConfigured) { mockSetReviewFeatured(reviewId, featured); return; }
-  await requireSupabase().from("reviews").update({ featured }).eq("id", reviewId);
+export async function setReviewFeatured(reviewId: string, featured: boolean, backgroundUrl?: string): Promise<void> {
+  if (!isSupabaseConfigured) { mockSetReviewFeatured(reviewId, featured, backgroundUrl); return; }
+  const update: { featured: boolean; background_url?: string } = { featured };
+  if (backgroundUrl !== undefined) update.background_url = backgroundUrl;
+  await requireSupabase().from("reviews").update(update).eq("id", reviewId);
 }
 
 export async function updateUsername(username: string): Promise<void> {
