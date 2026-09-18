@@ -50,6 +50,7 @@ create table if not exists public.reviews (
 );
 alter table public.reviews add column if not exists featured boolean not null default false;
 alter table public.reviews add column if not exists background_url text;
+alter table public.reviews add column if not exists tags text[] not null default '{}';
 
 -- ─── movie_ratings ──────────────────────────────────────────────────────
 create table if not exists public.movie_ratings (

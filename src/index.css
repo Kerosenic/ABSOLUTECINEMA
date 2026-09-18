@@ -39,25 +39,6 @@
   --radius: 0.5rem;
 }
 
-.light {
-  --background: #f5f3ef;
-  --foreground: #0a0a0c;
-  --card: #ffffff;
-  --card-foreground: #0a0a0c;
-  --primary: #ff2b3d;
-  --primary-foreground: #ffffff;
-  --secondary: #ebe8e3;
-  --secondary-foreground: #3a3a3f;
-  --muted: #e2dfd9;
-  --muted-foreground: #737068;
-  --accent: #ff1a44;
-  --accent-foreground: #ffffff;
-  --border: #dedad4;
-  --ring: #ff1a44;
-  --star: #f5a623;
-  --radius: 0.5rem;
-}
-
 html, body, #root {
   height: 100%;
 }

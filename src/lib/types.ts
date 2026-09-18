@@ -33,6 +33,10 @@ export interface MovieRating {
   rating: number;
 }
 
+export const REVIEW_TAGS = ["comment", "review", "analysis", "spoiler"] as const;
+
+export type ReviewTag = (typeof REVIEW_TAGS)[number];
+
 export interface Review {
   id: string;
   movie_id: string;
@@ -41,6 +45,7 @@ export interface Review {
   avatar_url?: string | null;
   rating: number;
   body: string;
+  tags: ReviewTag[];
   upvotes: number;
   downvotes: number;
   created_at: string;

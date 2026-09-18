@@ -4,7 +4,7 @@
 
 import { isSupabaseConfigured, requireSupabase } from "./supabase";
 import type {
-  Movie, Review, Reply, Poll, Screening, Vault, VaultTab, LeaderboardRow, Profile, Session, Notification, Announcement, MovieRating,
+  Movie, Review, ReviewTag, Reply, Poll, Screening, Vault, VaultTab, LeaderboardRow, Profile, Session, Notification, Announcement, MovieRating,
 } from "./types";
 import {
   MOCK_USER, LEADERBOARD,
@@ -145,6 +145,7 @@ export async function listReviews(): Promise<Review[]> {
     upvotes: tally.get(r.id)?.up ?? 0, downvotes: tally.get(r.id)?.down ?? 0,
     featured: r.featured ?? false,
     background_url: r.background_url ?? null,
+    tags: r.tags ?? [],
   }));
 }
 
@@ -296,7 +297,7 @@ async function currentUserId(): Promise<string | null> {
   return data.user?.id ?? null;
 }
 
-export async function createReview(input: { movie_id: string; rating: number; body: string }): Promise<Review> {
+export async function createReview(input: { movie_id: string; rating: number; body: string; tags: ReviewTag[] }): Promise<Review> {
   if (!isSupabaseConfigured) return mockCreateReview(input);
   const sb = requireSupabase();
   const uid = await currentUserId();
@@ -305,12 +306,13 @@ export async function createReview(input: { movie_id: string; rating: number; bo
   await sb.from("reviews").insert({
     author_id: uid, movie_id: input.movie_id,
     title: movie?.title ?? "", poster_url: movie?.poster_url ?? null,
-    rating: input.rating, body: input.body,
+    rating: input.rating, body: input.body, tags: input.tags,
   });
   const profile = await fetchProfile(uid);
   return {
     id: "", movie_id: input.movie_id, author_id: uid,
     username: profile?.username ?? "Member", rating: input.rating, body: input.body,
+    tags: input.tags,
     upvotes: 0, downvotes: 0, created_at: new Date().toISOString(), featured: false,
   };
 }
@@ -465,13 +467,13 @@ export async function deleteReview(id: string): Promise<void> {
   await requireSupabase().from("reviews").delete().eq("id", id);
 }
 
-export async function updateReview(id: string, input: { movie_id: string; rating: number; body: string }): Promise<void> {
+export async function updateReview(id: string, input: { movie_id: string; rating: number; body: string; tags: ReviewTag[] }): Promise<void> {
   if (!isSupabaseConfigured) { mockUpdateReview(id, input); return; }
   const sb = requireSupabase();
   const uid = await currentUserId();
   if (!uid) throw new Error("Sign in to edit a review");
   await sb.from("reviews")
-    .update({ rating: input.rating, body: input.body, updated_at: new Date().toISOString() })
+    .update({ rating: input.rating, body: input.body, tags: input.tags, updated_at: new Date().toISOString() })
     .eq("id", id)
     .eq("author_id", uid);
 }

@@ -8,10 +8,13 @@
 
 import { z } from "zod";
 
+import { REVIEW_TAGS } from "./types";
+
 export const reviewSchema = z.object({
   movie_id: z.string().min(1, "Pick a movie to review"),
   rating: z.number().int().min(1, "Choose a star rating").max(10),
   body: z.string().trim().min(10, "Review needs at least 10 characters"),
+  tags: z.array(z.enum(REVIEW_TAGS)).max(REVIEW_TAGS.length).default([]),
   background_url: z.string().trim().optional(),
 });
 

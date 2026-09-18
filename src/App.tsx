@@ -3,6 +3,7 @@ import { useState, useCallback, useEffect, useRef } from "react"
 import type {
   Movie,
   Review,
+  ReviewTag,
   Reply,
   Poll,
   Screening,
@@ -14,6 +15,8 @@ import type {
   Session,
   Announcement,
 } from "./lib/types"
+
+import { REVIEW_TAGS } from "./lib/types"
 
 import {
   initials,
@@ -582,6 +585,14 @@ function SignInModal({ onClose }: { onClose: () => void }) {
             : "Create your free account"}
         </p>
 
+        {mode === "signup" && (
+          <div className="mb-5 px-3 py-2 rounded-lg border border-[var(--accent)]/40 bg-[var(--accent)]/10">
+            <p className="text-xs font-bold text-[var(--accent)] uppercase tracking-wide text-center">
+              Please check spam or junk email
+            </p>
+          </div>
+        )}
+
         <div className="flex flex-col gap-3 mb-5">
           {mode === "signup" && (
             <div>
@@ -882,16 +893,12 @@ function LoadingScreen() {
 function NavBar({
   page,
   setPage,
-  dark,
-  setDark,
   session,
   onSignIn,
   onSignOut,
 }: {
   page: Page
   setPage: (p: Page) => void
-  dark: boolean
-  setDark: (v: boolean) => void
 
   session: Session | null
   onSignIn: () => void
@@ -1016,43 +1023,6 @@ function NavBar({
 
         {/* Actions */}
         <div className="hidden lg:flex items-center gap-3 flex-shrink-0">
-          <button
-            onClick={() => setDark(!dark)}
-            title={dark ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-            aria-pressed={dark}
-            className="relative w-11 h-6 rounded-full border border-[var(--border)] bg-[var(--muted)] transition-colors hover:border-[var(--accent)]/50"
-          >
-            <span
-              className={`absolute top-0.5 w-5 h-5 rounded-full flex items-center justify-center transition-all duration-300 ${
-                dark
-                  ? "left-0.5 bg-[var(--muted-foreground)]"
-                  : "left-5 bg-[var(--accent)]"
-              }`}
-            >
-              {dark ? (
-                <svg
-                  className="w-3 h-3 text-[var(--background)]"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
-                </svg>
-              ) : (
-                <svg
-                  className="w-3 h-3 text-white"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              )}
-            </span>
-          </button>
           {session && <NotificationBell onNavigate={onNotifNav} />}
           {session ? (
             <>
@@ -1087,18 +1057,6 @@ function NavBar({
         {/* Mobile right */}
         <div className="lg:hidden flex items-center gap-2">
           {session && <NotificationBell onNavigate={onNotifNav} />}
-          <button
-            onClick={() => setDark(!dark)}
-            aria-label={dark ? "Switch to light mode" : "Switch to dark mode"}
-            aria-pressed={dark}
-            className="relative w-10 h-5 rounded-full border border-[var(--border)] bg-[var(--muted)]"
-          >
-            <span
-              className={`absolute top-0.5 w-4 h-4 rounded-full bg-[var(--accent)] transition-all duration-300 ${
-                dark ? "left-0.5" : "left-5"
-              }`}
-            />
-          </button>
           <button
             onClick={() => setMenuOpen(!menuOpen)}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
@@ -1603,6 +1561,27 @@ function ScreeningCard({ screening }: { screening: Screening }) {
 
 // ─── Review Card ──────────────────────────────────────────────────────────────
 
+function ReviewTagChips({ tags }: { tags: ReviewTag[] }) {
+  if (!tags.length) return null
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {tags.map((t) => (
+        <span
+          key={t}
+          className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+            t === "spoiler"
+              ? "text-[var(--accent)] border-[var(--accent)]/60"
+              : "text-[var(--muted-foreground)] border-[var(--border)]"
+          }`}
+        >
+          {t}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 function ReviewCard({
   review,
   replies,
@@ -1625,6 +1604,8 @@ function ReviewCard({
   const movie = movies.find((m) => m.id === review.movie_id)
 
   const [showReplies, setShowReplies] = useState(false)
+
+  const [expanded, setExpanded] = useState(false)
 
   const [replyText, setReplyText] = useState("")
 
@@ -1685,7 +1666,14 @@ function ReviewCard({
               · {timeAgo(review.created_at)}
             </span>
           </div>
-          <p className="text-sm text-[var(--secondary-foreground)] leading-relaxed line-clamp-2">
+          <ReviewTagChips tags={review.tags} />
+          <p
+            onClick={() => setExpanded((e) => !e)}
+            className={`text-sm text-[var(--secondary-foreground)] leading-relaxed cursor-pointer select-none hover:text-[var(--foreground)] transition-colors ${
+              expanded ? "" : "line-clamp-2"
+            }`}
+            title={expanded ? "Click to collapse" : "Click to expand"}
+          >
             {review.body}
           </p>
         </div>
@@ -1835,6 +1823,161 @@ function ReviewCard({
   )
 }
 
+// ─── Movie Reviews Modal ─────────────────────────────────────────────────────
+
+function MovieReviewsModal({
+  movie,
+  reviews,
+  threads,
+  onClose,
+}: {
+  movie: Movie
+  reviews: Review[]
+  threads: Record<string, Reply[]>
+  onClose: () => void
+}) {
+  const ref = useFocusTrap(true)
+
+  const movieReviews = reviews
+    .filter((r) => r.movie_id === movie.id)
+    .sort(
+      (a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    )
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose()
+
+    window.addEventListener("keydown", esc)
+
+    return () => window.removeEventListener("keydown", esc)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Reviews for ${movie.title}`}
+        className="relative bg-[var(--card)] border border-[var(--border)] rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-4 p-5 border-b border-[var(--border)]">
+          <img
+            src={movie.poster}
+            alt={movie.title}
+            onError={(e) => {
+              e.currentTarget.style.opacity = "0"
+            }}
+            className="w-12 h-16 object-cover rounded-lg bg-[var(--muted)] flex-shrink-0"
+          />
+          <div className="flex-1 min-w-0">
+            <h2 className="font-display font-900 text-xl text-[var(--foreground)] leading-tight truncate uppercase">
+              {movie.title}
+            </h2>
+            <p className="text-xs text-[var(--muted-foreground)]">
+              {movie.year} · {movie.director} · {movieReviews.length}{" "}
+              {movieReviews.length === 1 ? "review" : "reviews"}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          >
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+        </div>
+
+        <div className="overflow-y-auto p-5 flex flex-col gap-4">
+          {movieReviews.length === 0 && (
+            <p className="text-sm text-[var(--muted-foreground)] text-center py-10">
+              No reviews yet.
+            </p>
+          )}
+          {movieReviews.map((r) => {
+            const replies = threads[r.id] ?? []
+
+            return (
+              <div
+                key={r.id}
+                className="border border-[var(--border)] rounded-xl overflow-hidden"
+              >
+                <div className="p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Avt
+                      initials={initials(r.username)}
+                      src={r.avatar_url}
+                      size="sm"
+                    />
+                    <span className="text-sm font-semibold text-[var(--foreground)]">
+                      {r.username}
+                    </span>
+                    <span className="text-xs text-[var(--muted-foreground)]">
+                      · {timeAgo(r.created_at)}
+                    </span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <StarRating rating={r.rating} />
+                      <span className="text-xs font-display font-900 text-[var(--accent)]">
+                        {r.rating}/10
+                      </span>
+                    </div>
+                  </div>
+                  <p className="text-sm text-[var(--secondary-foreground)] leading-relaxed">
+                    {r.body}
+                  </p>
+                  <ReviewTagChips tags={r.tags} />
+                </div>
+                {replies.length > 0 && (
+                  <div className="border-t border-[var(--border)] bg-[var(--muted)]/40 px-4 py-3 flex flex-col gap-2">
+                    {replies.map((c) => (
+                      <div key={c.id} className="flex gap-2 items-start">
+                        <Avt
+                          initials={initials(c.username)}
+                          src={c.avatar_url}
+                          size="xs"
+                        />
+                        <div className="flex-1 bg-[var(--card)] rounded-lg px-3 py-2 border border-[var(--border)]">
+                          <p className="text-xs font-semibold text-[var(--foreground)] mb-0.5">
+                            {c.username}{" "}
+                            <span className="text-[var(--muted-foreground)] font-normal">
+                              · {timeAgo(c.created_at)}
+                            </span>
+                          </p>
+                          <p className="text-xs text-[var(--secondary-foreground)] leading-relaxed">
+                            {c.body}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Write Review Modal ───────────────────────────────────────────────────────
 
 function WriteReviewModal({
@@ -1845,7 +1988,7 @@ function WriteReviewModal({
   editing,
 }: {
   onClose: () => void
-  onSubmit: (movieId: string, rating: number, body: string) => void
+  onSubmit: (movieId: string, rating: number, body: string, tags: ReviewTag[]) => void
   movies: Movie[]
   initialMovieId?: string
   editing?: Review
@@ -1855,6 +1998,8 @@ function WriteReviewModal({
   const [rating, setRating] = useState(editing?.rating ?? 0)
 
   const [body, setBody] = useState(editing?.body ?? "")
+
+  const [tags, setTags] = useState<ReviewTag[]>(editing?.tags ?? [])
 
   const [movieId, setMovieId] = useState(editing?.movie_id ?? initialMovieId ?? "")
 
@@ -1889,13 +2034,14 @@ function WriteReviewModal({
       movie_id: movieId,
       rating,
       body,
+      tags,
     })
 
     setFieldErrors(errors)
 
     if (Object.keys(errors).length) return
 
-    onSubmit(data.movie_id, data.rating, data.body)
+    onSubmit(data.movie_id, data.rating, data.body, data.tags)
   }
 
   return (
@@ -2020,6 +2166,35 @@ function WriteReviewModal({
                 {fieldErrors.rating}
               </p>
             )}
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 block">
+              Tags
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {REVIEW_TAGS.map((t) => {
+                const active = tags.includes(t)
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() =>
+                      setTags((prev) =>
+                        active ? prev.filter((x) => x !== t) : [...prev, t],
+                      )
+                    }
+                    aria-pressed={active}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                      active
+                        ? "bg-[var(--accent)] text-black border-[var(--accent)]"
+                        : "bg-[var(--muted)] text-[var(--muted-foreground)] border-[var(--border)] hover:border-[var(--accent)]/50"
+                    }`}
+                  >
+                    {t}
+                  </button>
+                )
+              })}
+            </div>
           </div>
           <div>
             <label className="text-xs font-semibold text-[var(--muted-foreground)] uppercase tracking-wider mb-1.5 block">
@@ -2285,6 +2460,7 @@ function LibCard({
   onToggleVault,
   onRate,
   onReview,
+  onOpen,
 }: {
   movie: Movie
   avg: number | null
@@ -2293,6 +2469,7 @@ function LibCard({
   onToggleVault: (id: string, tab: VaultTab) => void
   onRate: () => void
   onReview: () => void
+  onOpen?: () => void
 }) {
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -2324,7 +2501,7 @@ function LibCard({
   )
 
   return (
-    <div className="group relative cursor-pointer">
+    <div className="group relative cursor-pointer" onDoubleClick={onOpen}>
       <div className="aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] relative">
         <img
           src={movie.poster}
@@ -2436,8 +2613,8 @@ function HomePage({
   myRatings: Record<string, number>
   onToggleVault: (id: string, tab: VaultTab) => void
   onRate: (movieId: string, rating: number) => void
-  onWriteReview: (movieId: string, rating: number, body: string) => void
-  onEditReview: (id: string, movieId: string, rating: number, body: string) => void
+  onWriteReview: (movieId: string, rating: number, body: string, tags: ReviewTag[]) => void
+  onEditReview: (id: string, movieId: string, rating: number, body: string, tags: ReviewTag[]) => void
   myId: string
 
   announcements: Announcement[]
@@ -2456,6 +2633,8 @@ function HomePage({
   const [rateTarget, setRateTarget] = useState<Movie | null>(null)
 
   const [reviewTarget, setReviewTarget] = useState<Movie | null>(null)
+
+  const [movieFocus, setMovieFocus] = useState<Movie | null>(null)
 
   const [editingReview, setEditingReview] = useState<Review | null>(null)
 
@@ -2520,8 +2699,8 @@ function HomePage({
       {showWriteReview && (
         <WriteReviewModal
           onClose={() => setShowWriteReview(false)}
-          onSubmit={(movieId, rating, body) => {
-            onWriteReview(movieId, rating, body)
+          onSubmit={(movieId, rating, body, tags) => {
+            onWriteReview(movieId, rating, body, tags)
             setShowWriteReview(false)
           }}
           movies={movies}
@@ -2544,8 +2723,8 @@ function HomePage({
         <WriteReviewModal
           initialMovieId={reviewTarget.id}
           onClose={() => setReviewTarget(null)}
-          onSubmit={(movieId, rating, body) => {
-            onWriteReview(movieId, rating, body)
+          onSubmit={(movieId, rating, body, tags) => {
+            onWriteReview(movieId, rating, body, tags)
             setReviewTarget(null)
           }}
           movies={movies}
@@ -2556,11 +2735,20 @@ function HomePage({
         <WriteReviewModal
           editing={editingReview}
           onClose={() => setEditingReview(null)}
-          onSubmit={(movieId, rating, body) => {
-            onEditReview(editingReview.id, movieId, rating, body)
+          onSubmit={(movieId, rating, body, tags) => {
+            onEditReview(editingReview.id, movieId, rating, body, tags)
             setEditingReview(null)
           }}
           movies={movies}
+        />
+      )}
+
+      {movieFocus && (
+        <MovieReviewsModal
+          movie={movieFocus}
+          reviews={reviews}
+          threads={threads}
+          onClose={() => setMovieFocus(null)}
         />
       )}
 
@@ -2767,6 +2955,7 @@ function HomePage({
                 onToggleVault={onToggleVault}
                 onRate={() => setRateTarget(m)}
                 onReview={() => setReviewTarget(m)}
+                onOpen={() => setMovieFocus(m)}
               />
             )
           })}
@@ -3399,25 +3588,39 @@ function LeaderboardPage({ leaderboard }: { leaderboard: LeaderboardRow[] }) {
 function ProfilePage({
   movies,
   reviews,
+  ratings,
+  myRatings,
   vault,
   members,
   following,
   onToggleFollow,
+  onToggleVault,
+  onRate,
+  onWriteReview,
   session,
   onUploadAvatar,
   onUpdateUsername,
 }: {
   movies: Movie[]
   reviews: Review[]
+  ratings: MovieRating[]
+  myRatings: Record<string, number>
   vault: Record<VaultTab, string[]>
   members: Profile[]
   following: string[]
   onToggleFollow: (id: string, username: string) => void
+  onToggleVault: (id: string, tab: VaultTab) => void
+  onRate: (movieId: string, rating: number) => void
+  onWriteReview: (movieId: string, rating: number, body: string, tags: ReviewTag[]) => void
   session: Session | null
   onUploadAvatar: (file: File) => void
   onUpdateUsername: (username: string) => void
 }) {
   const [tab, setTab] = useState<VaultTab>("watched")
+
+  const [rateTarget, setRateTarget] = useState<Movie | null>(null)
+
+  const [reviewTarget, setReviewTarget] = useState<Movie | null>(null)
 
   const [friendQ, setFriendQ] = useState("")
 
@@ -3459,6 +3662,31 @@ function ProfilePage({
   const netUpvotes = reviews.reduce((a, r) => a + r.upvotes - r.downvotes, 0)
 
   return (
+    <>
+      {rateTarget && (
+        <RateModal
+          movie={rateTarget}
+          current={myRatings[rateTarget.id] ?? null}
+          onClose={() => setRateTarget(null)}
+          onSubmit={(v) => {
+            onRate(rateTarget.id, v)
+            setRateTarget(null)
+          }}
+        />
+      )}
+
+      {reviewTarget && (
+        <WriteReviewModal
+          initialMovieId={reviewTarget.id}
+          onClose={() => setReviewTarget(null)}
+          onSubmit={(movieId, rating, body, tags) => {
+            onWriteReview(movieId, rating, body, tags)
+            setReviewTarget(null)
+          }}
+          movies={movies}
+        />
+      )}
+
     <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-20 pb-16">
       {/* Banner */}
       <div className="relative h-44 rounded-2xl overflow-hidden mb-4 bg-[var(--muted)]">
@@ -3659,33 +3887,21 @@ function ProfilePage({
           </div>
 
           <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-4 xl:grid-cols-5 gap-3 mb-8">
-            {vaultMovies.map((m) => (
-              <div key={m.id} className="group cursor-pointer">
-                <div className="aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] relative">
-                  <img
-                    src={m.poster}
-                    alt={m.title}
-                    loading="lazy"
-                    decoding="async"
-                    onError={(e) => {
-                      e.currentTarget.style.opacity = "0"
-                    }}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-400"
-                  />
-                  {tab === "favorites" && (
-                    <div className="absolute top-1.5 right-1.5 text-[var(--star)] text-sm drop-shadow">
-                      ★
-                    </div>
-                  )}
-                </div>
-                <p className="text-xs font-semibold text-[var(--foreground)] mt-1.5 truncate">
-                  {m.title}
-                </p>
-                <p className="text-[10px] font-bold text-[var(--star)]">
-                  ★ {m.rating}
-                </p>
-              </div>
-            ))}
+            {vaultMovies.map((m) => {
+              const { avg, count } = avgRating(reviews, ratings, m.id)
+              return (
+                <LibCard
+                  key={m.id}
+                  movie={m}
+                  avg={avg}
+                  count={count}
+                  vault={vault}
+                  onToggleVault={onToggleVault}
+                  onRate={() => setRateTarget(m)}
+                  onReview={() => setReviewTarget(m)}
+                />
+              )
+            })}
             {vaultMovies.length === 0 && (
               <p className="text-sm text-[var(--muted-foreground)] col-span-full py-8 text-center">
                 Nothing here yet.
@@ -3879,6 +4095,7 @@ function ProfilePage({
         </div>
       </div>
     </div>
+    </>
   )
 }
 
@@ -4097,14 +4314,6 @@ function AdminPage({
 
   const [aErrors, setAErrors] = useState<FieldErrors>({})
 
-  // Comments moderation filters
-
-  const [cUser, setCUser] = useState("")
-
-  const [cMovie, setCMovie] = useState("")
-
-  const [cSort, setCSort] = useState<"recent" | "oldest">("recent")
-
   const inputCls =
     "w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors"
 
@@ -4235,35 +4444,9 @@ function AdminPage({
     setABody("")
   }
 
-  const movieOptions = [...movies].sort((a, b) =>
-    a.title.localeCompare(b.title),
-  )
-
   const allComments = Object.entries(threads)
-
     .flatMap(([reviewId, list]) => list.map((c) => ({ ...c, reviewId })))
-
-    .filter((c) => {
-      if (
-        cUser.trim() &&
-        !c.username.toLowerCase().includes(cUser.trim().toLowerCase())
-      )
-        return false
-
-      if (cMovie) {
-        const review = reviews.find((r) => r.id === c.reviewId)
-
-        if (!review || review.movie_id !== cMovie) return false
-      }
-
-      return true
-    })
-
-    .sort((a, b) =>
-      cSort === "recent"
-        ? b.created_at.localeCompare(a.created_at)
-        : a.created_at.localeCompare(b.created_at),
-    )
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
 
   return (
     <>
@@ -4582,7 +4765,37 @@ function AdminPage({
               </div>
             )
           })}
-          {reviews.length === 0 && (
+          {allComments.map((c) => {
+            const review = reviews.find((r) => r.id === c.reviewId)
+
+            const movie = review && movies.find((m) => m.id === review.movie_id)
+
+            return (
+              <div
+                key={c.id}
+                className="flex items-center gap-3 border border-[var(--border)] rounded-lg px-3 py-2"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[var(--foreground)] truncate">
+                    {movie ? movie.title : "Unknown"}{" "}
+                    <span className="text-[var(--muted-foreground)] font-normal">
+                      · {c.username} · reply
+                    </span>
+                  </p>
+                  <p className="text-xs text-[var(--muted-foreground)] truncate">
+                    {c.body}
+                  </p>
+                </div>
+                <button
+                  onClick={() => onDeleteComment(c.id)}
+                  className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors"
+                >
+                  Delete
+                </button>
+              </div>
+            )
+          })}
+          {reviews.length === 0 && allComments.length === 0 && (
             <p className="text-sm text-[var(--muted-foreground)] text-center py-4">
               No reviews.
             </p>
@@ -4798,82 +5011,6 @@ function AdminPage({
           {deletedMovies.length === 0 && (
             <p className="text-sm text-[var(--muted-foreground)] text-center py-4">
               No deleted movies.
-            </p>
-          )}
-        </div>
-      </div>
-
-      {/* Comments moderation */}
-      <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 mt-6">
-        <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">
-          COMMENTS
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
-          <input
-            value={cUser}
-            onChange={(e) => setCUser(e.target.value)}
-            placeholder="Search by user"
-            className={inputCls}
-          />
-          <select
-            value={cMovie}
-            onChange={(e) => setCMovie(e.target.value)}
-            className={inputCls}
-          >
-            <option value="">All movies</option>
-            {movieOptions.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.title}
-              </option>
-            ))}
-          </select>
-          <select
-            value={cSort}
-            onChange={(e) => setCSort(e.target.value as "recent" | "oldest")}
-            className={inputCls}
-          >
-            <option value="recent">Most recent first</option>
-            <option value="oldest">Oldest first</option>
-          </select>
-        </div>
-        <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
-          {allComments.map((c) => {
-            const review = reviews.find((r) => r.id === c.reviewId)
-
-            const movie = review && movies.find((m) => m.id === review.movie_id)
-
-            return (
-              <div
-                key={c.id}
-                className="flex items-start gap-3 border border-[var(--border)] rounded-lg px-3 py-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-[var(--muted-foreground)] truncate">
-                    on{" "}
-                    <span className="text-[var(--foreground)] font-medium">
-                      {movie ? movie.title : "Unknown"}
-                    </span>{" "}
-                    · {timeAgo(c.created_at)}
-                  </p>
-                  <p className="text-sm text-[var(--secondary-foreground)]">
-                    <span className="font-semibold text-[var(--foreground)]">
-                      {c.username}
-                    </span>{" "}
-                    · {c.body}
-                  </p>
-                </div>
-                <button
-                  onClick={() => onDeleteComment(c.id)}
-                  className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors"
-                >
-                  Delete
-                </button>
-              </div>
-            )
-          })}
-          {allComments.length === 0 && (
-            <p className="text-sm text-[var(--muted-foreground)] text-center py-4">
-              No comments.
             </p>
           )}
         </div>
@@ -5145,8 +5282,6 @@ function Footer({ setPage }: { setPage: (p: Page) => void }) {
 export default function App() {
   const [page, setPage] = useState<Page>("home")
 
-  const [dark, setDark] = usePersistentState("ac-dark", () => true)
-
   const [showSignIn, setShowSignIn] = useState(false)
 
   const { toasts, push } = useToast()
@@ -5303,8 +5438,8 @@ export default function App() {
     })
   }
 
-  const onWriteReview = (movieId: string, rating: number, body: string) => {
-    createReview.mutate({ movie_id: movieId, rating, body }, {
+  const onWriteReview = (movieId: string, rating: number, body: string, tags: ReviewTag[]) => {
+    createReview.mutate({ movie_id: movieId, rating, body, tags }, {
       onSuccess: () => push("Review published!"),
 
       onError: () => push("Couldn't publish review", "info"),
@@ -5367,9 +5502,9 @@ export default function App() {
     deleteReview.mutate(id, { onSuccess: () => push("Review removed") })
   }
 
-  const onEditReview = (id: string, movieId: string, rating: number, body: string) => {
+  const onEditReview = (id: string, movieId: string, rating: number, body: string, tags: ReviewTag[]) => {
     updateReview.mutate(
-      { id, movie_id: movieId, rating, body },
+      { id, movie_id: movieId, rating, body, tags },
       {
         onSuccess: () => push("Review updated!"),
 
@@ -5480,9 +5615,7 @@ export default function App() {
 
   return (
     <div
-      className={`${
-        dark ? "" : "light"
-      } min-h-screen bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300`}
+      className="min-h-screen bg-[var(--background)] text-[var(--foreground)] transition-colors duration-300"
       style={{ fontFamily: "'Outfit', sans-serif" }}
     >
       {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
@@ -5492,8 +5625,6 @@ export default function App() {
       <NavBar
         page={page}
         setPage={setPageSafe}
-        dark={dark}
-        setDark={setDark}
         session={session}
         onSignIn={() => setShowSignIn(true)}
         onSignOut={() => auth.signOut()}
@@ -5537,10 +5668,15 @@ export default function App() {
               <ProfilePage
                 movies={moviesData}
                 reviews={reviewsData}
+                ratings={movieRatingsData}
+                myRatings={myRatings}
                 vault={vaultData}
                 members={membersData}
                 following={followingData}
                 onToggleFollow={onToggleFollow}
+                onToggleVault={onToggleVault}
+                onRate={onRate}
+                onWriteReview={onWriteReview}
                 session={session}
                 onUploadAvatar={onUploadAvatar}
                 onUpdateUsername={onUpdateUsername}

@@ -9,7 +9,7 @@ import { MOCK_USER } from "./mock";
 import { getSession, setSession, useSession } from "./session";
 import { fetchProfile } from "./api";
 import * as api from "./api";
-import type { Vault, VaultTab, Reply, Review, Notification, Movie, Announcement, Profile, Screening, MovieRating } from "./types";
+import type { Vault, VaultTab, Reply, Review, ReviewTag, Notification, Movie, Announcement, Profile, Screening, MovieRating } from "./types";
 
 export { useSession };
 
@@ -185,7 +185,7 @@ export function useCreateReview() {
     return patch<Review[]>(qc, ["reviews"], (old) => {
       const review: Review = {
         id: `tmp-${Date.now()}`, movie_id: input.movie_id, author_id: uid,
-        username, rating: input.rating, body: input.body,
+        username, rating: input.rating, body: input.body, tags: input.tags,
         upvotes: 0, downvotes: 0, created_at: new Date().toISOString(), featured: false,
       };
       return [review, ...old];
@@ -336,12 +336,12 @@ export function useDeleteReview() {
 
 export function useUpdateReview() {
   return useOptimisticMutation(
-    (args: { id: string; movie_id: string; rating: number; body: string }) =>
-      api.updateReview(args.id, { movie_id: args.movie_id, rating: args.rating, body: args.body }),
+    (args: { id: string; movie_id: string; rating: number; body: string; tags: ReviewTag[] }) =>
+      api.updateReview(args.id, { movie_id: args.movie_id, rating: args.rating, body: args.body, tags: args.tags }),
     [["reviews"], ["leaderboard"]],
     (args, qc) =>
       patch<Review[]>(qc, ["reviews"], (old) =>
-        old.map((r) => (r.id === args.id ? { ...r, rating: args.rating, body: args.body } : r)),
+        old.map((r) => (r.id === args.id ? { ...r, rating: args.rating, body: args.body, tags: args.tags } : r)),
       ),
   );
 }

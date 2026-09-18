@@ -5,6 +5,7 @@
 import type {
   Movie,
   Review,
+  ReviewTag,
   Reply,
   Poll,
   Screening,
@@ -13427,6 +13428,7 @@ export function mockCreateReview(input: {
   movie_id: string
   rating: number
   body: string
+  tags: ReviewTag[]
 }): Review {
   const reviews = mockReviews()
 
@@ -13442,6 +13444,8 @@ export function mockCreateReview(input: {
     rating: input.rating,
 
     body: input.body,
+
+    tags: input.tags,
 
     upvotes: 0,
 
@@ -13603,13 +13607,13 @@ export function mockDeleteReview(id: string) {
 
 export function mockUpdateReview(
   id: string,
-  input: { movie_id: string; rating: number; body: string },
+  input: { movie_id: string; rating: number; body: string; tags: ReviewTag[] },
 ) {
   save(
     KEYS.reviews,
     mockReviews().map((r) =>
       r.id === id
-        ? { ...r, movie_id: input.movie_id, rating: input.rating, body: input.body }
+        ? { ...r, movie_id: input.movie_id, rating: input.rating, body: input.body, tags: input.tags }
         : r,
     ),
   )
