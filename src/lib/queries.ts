@@ -64,6 +64,10 @@ export function useMovies() {
   return useQuery({ queryKey: ["movies"], queryFn: api.listMovies });
 }
 
+export function useDeletedMovies() {
+  return useQuery({ queryKey: ["deletedMovies"], queryFn: api.listDeletedMovies });
+}
+
 export function useReviews() {
   return useQuery({ queryKey: ["reviews"], queryFn: api.listReviews });
 }
@@ -304,8 +308,15 @@ export function useAddMovie() {
 export function useDeleteMovie() {
   return useOptimisticMutation(
     (id: string) => api.deleteMovie(id),
-    [["movies"], ["vault"], ["reviews"], ["leaderboard"]],
+    [["movies"], ["deletedMovies"], ["vault"], ["reviews"], ["leaderboard"]],
     (id, qc) => patch<Movie[]>(qc, ["movies"], (old) => old.filter((m) => m.id !== id)),
+  );
+}
+
+export function useRestoreMovie() {
+  return useOptimisticMutation(
+    (id: string) => api.restoreMovie(id),
+    [["movies"], ["deletedMovies"]],
   );
 }
 

@@ -1197,6 +1197,7 @@ export const MOVIES: Movie[] = [
   { id: "1193", title: "Flightplan", year: 2005, genre: "Thriller", rating: 6.3, director: "Robert Schwentke", poster: "https://m.media-amazon.com/images/M/MV5BMGQyZmQ1OGItYWNkNi00YzU4LWJmZjktNTQyZjNlOGNmNWJlXkEyXkFqcGc@._V1_SX500_.jpg" },
   { id: "1194", title: "Red Eye", year: 2005, genre: "Thriller", rating: 6.5, director: "Wes Craven", poster: "https://m.media-amazon.com/images/M/MV5BNzAxNjc1ODczOF5BMl5BanBnXkFtZTcwMjE3MjEzMw@@._V1_SX500_.jpg" },
   { id: "1195", title: "The Net", year: 1995, genre: "Thriller", rating: 5.9, director: "Irwin Winkler", poster: "https://m.media-amazon.com/images/M/MV5BMDNhMjgxODUtMWRjOS00N2JlLWEyYWEtOWJhNWQ1MTdmYTllXkEyXkFqcGc@._V1_SX500_.jpg" },
+  { id: "1196", title: "Avengers: Doomsday", year: 2026, genre: "Action", rating: 8.0, director: "Anthony and Joe Russo", poster: "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/e/ee/Avengers_Doomsday_poster.jpg&w=500" },
 ];
 
 export const TRENDING_IDS = ["33", "3", "37", "28", "11", "46"];
@@ -1501,7 +1502,11 @@ export function mockAddMovie(input: { title: string; year: number; genre: string
 }
 
 export function mockDeleteMovie(id: string) {
-  save(KEYS.movies, mockMovies().filter((m) => m.id !== id));
+  save(KEYS.movies, mockMovies().map((m) => (m.id === id ? { ...m, deleted_at: new Date().toISOString() } : m)));
+}
+
+export function mockRestoreMovie(id: string) {
+  save(KEYS.movies, mockMovies().map((m) => (m.id === id ? { ...m, deleted_at: null } : m)));
 }
 
 export function mockDeleteComment(id: string) {

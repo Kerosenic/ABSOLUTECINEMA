@@ -22,6 +22,7 @@ export interface Movie {
   rating: number;
   director: string;
   poster: string;
+  deleted_at?: string | null;
 }
 
 export interface Review {

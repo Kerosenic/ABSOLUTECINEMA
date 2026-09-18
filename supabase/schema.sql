@@ -34,6 +34,7 @@ create table if not exists public.movies (
   director text,
   poster_url text
 );
+alter table public.movies add column if not exists deleted_at timestamptz;
 
 -- ─── reviews ────────────────────────────────────────────────────────────
 create table if not exists public.reviews (
@@ -199,9 +200,9 @@ drop policy if exists "profiles owner update" on public.profiles;
 create policy "profiles owner update" on public.profiles for update
   using (auth.uid() = id) with check (auth.uid() = id);
 
--- movies: public read, admin write
+-- movies: public read (active only), admin write (incl. deleted)
 drop policy if exists "movies public read" on public.movies;
-create policy "movies public read" on public.movies for select using (true);
+create policy "movies public read" on public.movies for select using (deleted_at is null);
 drop policy if exists "movies admin write" on public.movies;
 create policy "movies admin write" on public.movies for all
   using (is_admin()) with check (is_admin());

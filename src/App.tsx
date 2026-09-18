@@ -10,7 +10,7 @@ import {
   useCreateReview, useVoteReview, useAddReply, useCastPollVote, useToggleFavorite,
   useToggleFollow, useAddScreening, useDeleteScreening, useAddPoll, useTogglePoll,
   useDeletePoll, useDeleteReview, useNotifications, useMarkNotificationsRead,
-  useAddMovie, useDeleteMovie, useDeleteComment,
+  useAddMovie, useDeleteMovie, useRestoreMovie, useDeletedMovies, useDeleteComment,
   useAnnouncements, useAddAnnouncement, useDeleteAnnouncement, useSetMemberRole,
   useSetReviewFeatured, useUpdateUsername,
 } from "./lib/queries";
@@ -177,6 +177,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [resendCooldown, setResendCooldown] = useState(0);
   const auth = useAuth();
   const ref = useFocusTrap(true);
 
@@ -186,7 +187,28 @@ function SignInModal({ onClose }: { onClose: () => void }) {
     return () => window.removeEventListener("keydown", esc);
   }, [onClose]);
 
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const t = setInterval(() => setResendCooldown((c) => Math.max(0, c - 1)), 1000);
+    return () => clearInterval(t);
+  }, [resendCooldown]);
+
   const msg = (e: unknown) => (e instanceof Error ? e.message : "Something went wrong");
+
+  const resend = async () => {
+    if (resendCooldown > 0 || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await auth.sendSignupCode(email);
+      setResendCooldown(10);
+      setNotice(`Code resent to ${email}. Check spam if you don't see it.`);
+    } catch (e) {
+      setError(msg(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async () => {
     // Sign-up, step 2: verify the code, then create the account and sign in.
@@ -223,6 +245,7 @@ function SignInModal({ onClose }: { onClose: () => void }) {
       } else {
         await auth.sendSignupCode(email);
         setSent(true);
+        setResendCooldown(10);
         setNotice(`Code sent to ${email}. Check spam if you don't see it.`);
       }
     } catch (e) {
@@ -268,8 +291,8 @@ function SignInModal({ onClose }: { onClose: () => void }) {
           {mode === "signup" && sent && (
             <div>
               <input value={code} onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setError(null); }} onKeyDown={(e) => e.key === "Enter" && submit()} inputMode="numeric" maxLength={6} placeholder="6-digit code" aria-invalid={!!error} className="w-full px-4 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors tracking-[0.3em] text-center" />
-              <button onClick={() => { auth.sendSignupCode(email).catch((e) => setError(msg(e))); }} className="text-xs text-[var(--accent)] font-semibold hover:opacity-80 mt-1">
-                Resend code
+              <button onClick={resend} disabled={resendCooldown > 0 || busy} className="mt-2 w-full px-4 py-2 rounded-lg border border-[var(--border)] bg-[var(--muted)] text-xs text-[var(--foreground)] font-semibold hover:bg-[var(--border)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                {resendCooldown > 0 ? `Resend code in ${resendCooldown}s` : "Resend code"}
               </button>
             </div>
           )}
@@ -506,7 +529,7 @@ function HeroBanner({ movies, reviews }: { movies: Movie[]; reviews: Review[] })
   const movie = movies.find((m) => m.id === review.movie_id);
   if (!movie) return null;
 
-  const heroImages = [
+  const fallbackPosters = [
     "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?w=1600&h=900&fit=crop&auto=format",
     "https://images.unsplash.com/photo-1524985069026-dd778a71c7b4?w=1600&h=900&fit=crop&auto=format",
     "https://images.unsplash.com/photo-1440404653325-ab127d49abc1?w=1600&h=900&fit=crop&auto=format",
@@ -514,9 +537,13 @@ function HeroBanner({ movies, reviews }: { movies: Movie[]; reviews: Review[] })
 
   return (
     <div className="relative h-[88vh] min-h-[560px] overflow-hidden">
-      {heroImages.map((src, i) => (
-        <img key={i} src={src} alt="" className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${i === activeIdx ? "opacity-100" : "opacity-0"}`} />
-      ))}
+      {featured.map((r, i) => {
+        const m = movies.find((mv) => mv.id === r.movie_id);
+        const src = m?.poster || fallbackPosters[i % fallbackPosters.length];
+        return (
+          <img key={i} src={src} alt="" className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-1000 ${i === activeIdx ? "opacity-100" : "opacity-0"}`} />
+        );
+      })}
 
       {/* Layered gradients for cinematic look */}
       <div className="absolute inset-0 bg-gradient-to-r from-[var(--background)] via-[var(--background)]/60 to-transparent" />
@@ -1549,12 +1576,12 @@ function AdminGate({ session, onUnlock, onSignIn }: {
 }
 
 // ─── Admin Page ───────────────────────────────────────────────────────────────
-function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAddPoll, onTogglePoll, onDeletePoll, reviews, movies, threads, onDeleteReview, onAddMovie, onDeleteMovie, onDeleteComment, onUploadPoster, announcements, members, onAddAnnouncement, onDeleteAnnouncement, onSetMemberRole, onSetReviewFeatured, session }: {
+function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAddPoll, onTogglePoll, onDeletePoll, reviews, movies, deletedMovies, threads, onDeleteReview, onAddMovie, onDeleteMovie, onRestoreMovie, onDeleteComment, onUploadPoster, announcements, members, onAddAnnouncement, onDeleteAnnouncement, onSetMemberRole, onSetReviewFeatured, session }: {
   screenings: Screening[]; onAddScreening: (s: Omit<Screening, "id">) => void; onDeleteScreening: (id: string) => void;
   polls: Poll[]; onAddPoll: (question: string, closes: string, options: string[]) => void; onTogglePoll: (id: string) => void; onDeletePoll: (id: string) => void;
-  reviews: Review[]; movies: Movie[]; threads: Record<string, Reply[]>; onDeleteReview: (id: string) => void;
+  reviews: Review[]; movies: Movie[]; deletedMovies: Movie[]; threads: Record<string, Reply[]>; onDeleteReview: (id: string) => void;
   onAddMovie: (m: { title: string; year: number; genre: string; rating: number; director: string; poster: string }) => void;
-  onDeleteMovie: (id: string) => void; onDeleteComment: (id: string) => void;
+  onDeleteMovie: (id: string) => void; onRestoreMovie: (id: string) => void; onDeleteComment: (id: string) => void;
   onUploadPoster: (file: File) => Promise<string>;
   announcements: Announcement[]; members: Profile[];
   onAddAnnouncement: (a: { title: string; body: string }) => void; onDeleteAnnouncement: (id: string) => void;
@@ -1565,6 +1592,8 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
   const [sDate, setSDate] = useState("");
   const [sTime, setSTime] = useState("");
   const [sLoc, setSLoc] = useState("");
+  const [sQuery, setSQuery] = useState("");
+  const [sOpen, setSOpen] = useState(false);
 
   // Poll form
   const [pQuestion, setPQuestion] = useState("");
@@ -1590,14 +1619,27 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
   const [aBody, setABody] = useState("");
   const [aErrors, setAErrors] = useState<FieldErrors>({});
 
+  // Comments moderation filters
+  const [cUser, setCUser] = useState("");
+  const [cMovie, setCMovie] = useState("");
+  const [cSort, setCSort] = useState<"recent" | "oldest">("recent");
+
   const inputCls = "w-full px-3 py-2.5 bg-[var(--muted)] border border-[var(--border)] rounded-lg text-sm text-[var(--foreground)] placeholder-[var(--muted-foreground)] outline-none focus:border-[var(--accent)] transition-colors";
+
+  const screeningMatches = movies
+    .filter((m) => m.title.toLowerCase().includes(sQuery.trim().toLowerCase()))
+    .slice(0, 8);
+  const selectScreeningMovie = (m: Movie) => {
+    setSTitle(m.title); setSQuery(m.title); setSOpen(false);
+    setSErrors((f) => ({ ...f, title: "" }));
+  };
 
   const addScreening = () => {
     const { data, errors } = parseForm(screeningSchema, { title: sTitle, date: sDate, time: sTime, location: sLoc });
     setSErrors(errors);
     if (Object.keys(errors).length) return;
     onAddScreening({ title: data.title, date: data.date, time: data.time, location: data.location || "Streaming" });
-    setSTitle(""); setSDate(""); setSTime(""); setSLoc("");
+    setSTitle(""); setSDate(""); setSTime(""); setSLoc(""); setSQuery(""); setSOpen(false);
   };
 
   const addPoll = () => {
@@ -1630,8 +1672,21 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
     setATitle(""); setABody("");
   };
 
-  const allComments = Object.entries(threads).flatMap(([reviewId, list]) =>
-    list.map((c) => ({ ...c, reviewId })));
+  const movieOptions = [...movies].sort((a, b) => a.title.localeCompare(b.title));
+
+  const allComments = Object.entries(threads)
+    .flatMap(([reviewId, list]) => list.map((c) => ({ ...c, reviewId })))
+    .filter((c) => {
+      if (cUser.trim() && !c.username.toLowerCase().includes(cUser.trim().toLowerCase())) return false;
+      if (cMovie) {
+        const review = reviews.find((r) => r.id === c.reviewId);
+        if (!review || review.movie_id !== cMovie) return false;
+      }
+      return true;
+    })
+    .sort((a, b) => cSort === "recent"
+      ? b.created_at.localeCompare(a.created_at)
+      : a.created_at.localeCompare(b.created_at));
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-24 pb-16">
@@ -1642,8 +1697,34 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
         <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5">
           <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">SCREENINGS</h3>
           <div className="flex flex-col gap-2 mb-4">
-            <div>
-              <input value={sTitle} onChange={(e) => { setSTitle(e.target.value); setSErrors((f) => ({ ...f, title: "" })); }} placeholder="Movie title" aria-invalid={!!sErrors.title} className={inputCls} />
+            <div className="relative">
+              <input
+                value={sQuery}
+                onChange={(e) => { setSQuery(e.target.value); setSTitle(""); setSOpen(true); setSErrors((f) => ({ ...f, title: "" })); }}
+                onFocus={() => setSOpen(true)}
+                onBlur={() => setTimeout(() => setSOpen(false), 120)}
+                placeholder="Search movie library"
+                aria-invalid={!!sErrors.title}
+                className={inputCls}
+              />
+              {sOpen && screeningMatches.length > 0 && (
+                <div className="absolute z-20 left-0 right-0 top-full mt-1 max-h-56 overflow-y-auto bg-[var(--card)] border border-[var(--border)] rounded-lg shadow-lg">
+                  {screeningMatches.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onMouseDown={() => selectScreeningMovie(m)}
+                      className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-[var(--muted)] transition-colors"
+                    >
+                      {m.poster ? <img src={m.poster} alt="" className="w-7 h-10 object-cover rounded shrink-0" /> : null}
+                      <span className="flex-1 min-w-0">
+                        <span className="block text-sm font-semibold text-[var(--foreground)] truncate">{m.title}</span>
+                        <span className="block text-xs text-[var(--muted-foreground)]">{m.year} · {m.genre}</span>
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
               {sErrors.title && <p className="text-xs text-[var(--accent)] mt-1">{sErrors.title}</p>}
             </div>
             <div className="grid grid-cols-2 gap-2">
@@ -1787,9 +1868,37 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
         </div>
       </div>
 
+      {/* Deleted movies */}
+      <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 mt-6">
+        <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">DELETED MOVIES</h3>
+        <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
+          {[...deletedMovies].sort((a, b) => (b.deleted_at ?? "").localeCompare(a.deleted_at ?? "")).map((m) => (
+            <div key={m.id} className="flex items-center gap-3 border border-[var(--border)] rounded-lg px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-[var(--foreground)] truncate">{m.title} <span className="text-[var(--muted-foreground)] font-normal">· {m.year} · {m.genre}</span></p>
+                <p className="text-xs text-[var(--muted-foreground)] truncate">{m.director}</p>
+              </div>
+              <button onClick={() => onRestoreMovie(m.id)} className="text-xs font-semibold text-[var(--accent)] hover:text-[var(--foreground)] transition-colors">Add back</button>
+            </div>
+          ))}
+          {deletedMovies.length === 0 && <p className="text-sm text-[var(--muted-foreground)] text-center py-4">No deleted movies.</p>}
+        </div>
+      </div>
+
       {/* Comments moderation */}
       <div className="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-5 mt-6">
         <h3 className="font-display font-800 text-lg text-[var(--foreground)] mb-4">COMMENTS</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-4">
+          <input value={cUser} onChange={(e) => setCUser(e.target.value)} placeholder="Search by user" className={inputCls} />
+          <select value={cMovie} onChange={(e) => setCMovie(e.target.value)} className={inputCls}>
+            <option value="">All movies</option>
+            {movieOptions.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}
+          </select>
+          <select value={cSort} onChange={(e) => setCSort(e.target.value as "recent" | "oldest")} className={inputCls}>
+            <option value="recent">Most recent first</option>
+            <option value="oldest">Oldest first</option>
+          </select>
+        </div>
         <div className="flex flex-col gap-2 max-h-96 overflow-y-auto">
           {allComments.map((c) => {
             const review = reviews.find((r) => r.id === c.reviewId);
@@ -1797,7 +1906,7 @@ function AdminPage({ screenings, onAddScreening, onDeleteScreening, polls, onAdd
             return (
               <div key={c.id} className="flex items-start gap-3 border border-[var(--border)] rounded-lg px-3 py-2">
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs text-[var(--muted-foreground)] truncate">on <span className="text-[var(--foreground)] font-medium">{movie ? movie.title : "Unknown"}</span></p>
+                  <p className="text-xs text-[var(--muted-foreground)] truncate">on <span className="text-[var(--foreground)] font-medium">{movie ? movie.title : "Unknown"}</span> · {timeAgo(c.created_at)}</p>
                   <p className="text-sm text-[var(--secondary-foreground)]"><span className="font-semibold text-[var(--foreground)]">{c.username}</span> · {c.body}</p>
                 </div>
                 <button onClick={() => onDeleteComment(c.id)} className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors">Delete</button>
@@ -1895,6 +2004,7 @@ export default function App() {
   const [adminUnlocked, setAdminUnlocked] = usePersistentState("ac-admin-unlock", () => false);
 
   const movies = useMovies();
+  const deletedMovies = useDeletedMovies();
   const reviews = useReviews();
   const threads = useThreads();
   const polls = usePolls();
@@ -1920,6 +2030,7 @@ export default function App() {
   const deleteReview = useDeleteReview();
   const addMovie = useAddMovie();
   const deleteMovie = useDeleteMovie();
+  const restoreMovie = useRestoreMovie();
   const deleteComment = useDeleteComment();
   const announcements = useAnnouncements();
   const addAnnouncement = useAddAnnouncement();
@@ -1931,6 +2042,7 @@ export default function App() {
   const setPageSafe = useCallback((p: Page) => setPage(p), []);
 
   const moviesData = movies.data ?? [];
+  const deletedMoviesData = deletedMovies.data ?? [];
   const reviewsData = reviews.data ?? [];
   const threadsData = threads.data ?? {};
   const pollsData = polls.data ?? [];
@@ -2000,7 +2112,11 @@ export default function App() {
   };
 
   const onDeleteMovie = (id: string) => {
-    deleteMovie.mutate(id, { onSuccess: () => push("Movie removed") });
+    deleteMovie.mutate(id, { onSuccess: () => push("Movie moved to deleted") });
+  };
+
+  const onRestoreMovie = (id: string) => {
+    restoreMovie.mutate(id, { onSuccess: () => push("Movie added back") });
   };
 
   const onDeleteComment = (id: string) => {
@@ -2073,7 +2189,7 @@ export default function App() {
         {page === "calendar" && <CalendarPage screenings={screeningsData} push={push} />}
         {page === "leaderboard" && <LeaderboardPage leaderboard={leaderboardData} />}
         {page === "profile" && <ProfilePage movies={moviesData} reviews={reviewsData} vault={vaultData} members={membersData} following={followingData} onToggleFollow={onToggleFollow} session={session} onUploadAvatar={onUploadAvatar} onUpdateUsername={onUpdateUsername} />}
-        {page === "admin" && (adminUnlocked && session ? <AdminPage screenings={screeningsData} onAddScreening={onAddScreening} onDeleteScreening={onDeleteScreening} polls={pollsData} onAddPoll={onAddPoll} onTogglePoll={onTogglePoll} onDeletePoll={onDeletePoll} reviews={reviewsData} movies={moviesData} threads={threadsData} onDeleteReview={onDeleteReview} onAddMovie={onAddMovie} onDeleteMovie={onDeleteMovie} onDeleteComment={onDeleteComment} onUploadPoster={onUploadPoster} announcements={announcementsData} members={membersData} onAddAnnouncement={onAddAnnouncement} onDeleteAnnouncement={onDeleteAnnouncement} onSetMemberRole={onSetMemberRole} onSetReviewFeatured={onSetReviewFeatured} session={session} /> : (
+        {page === "admin" && (adminUnlocked && session ? <AdminPage screenings={screeningsData} onAddScreening={onAddScreening} onDeleteScreening={onDeleteScreening} polls={pollsData} onAddPoll={onAddPoll} onTogglePoll={onTogglePoll} onDeletePoll={onDeletePoll} reviews={reviewsData} movies={moviesData} deletedMovies={deletedMoviesData} threads={threadsData} onDeleteReview={onDeleteReview} onAddMovie={onAddMovie} onDeleteMovie={onDeleteMovie} onRestoreMovie={onRestoreMovie} onDeleteComment={onDeleteComment} onUploadPoster={onUploadPoster} announcements={announcementsData} members={membersData} onAddAnnouncement={onAddAnnouncement} onDeleteAnnouncement={onDeleteAnnouncement} onSetMemberRole={onSetMemberRole} onSetReviewFeatured={onSetReviewFeatured} session={session} /> : (
           <AdminGate session={session} onUnlock={unlockAdmin} onSignIn={() => setShowSignIn(true)} />
         ))}
       </main>

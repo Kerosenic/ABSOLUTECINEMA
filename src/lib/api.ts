@@ -13,7 +13,7 @@ import {
   mockVoteReview, mockAddReply, mockCreateReview, mockCastPollVote,
   mockToggleFavorite, mockSetVaultStatus, mockToggleFollow,
   mockAddScreening, mockDeleteScreening, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview,
-  mockAddMovie, mockDeleteMovie, mockDeleteComment,
+  mockAddMovie, mockDeleteMovie, mockRestoreMovie, mockDeleteComment,
   mockMembers, mockSetMemberRole, mockAnnouncements, mockAddAnnouncement, mockDeleteAnnouncement,
   mockSetReviewFeatured, mockUpdateUsername,
 } from "./mock";
@@ -82,12 +82,22 @@ export async function signOut(): Promise<void> {
 
 // ─── Reads ────────────────────────────────────────────────────────────────────
 export async function listMovies(): Promise<Movie[]> {
-  if (!isSupabaseConfigured) return mockMovies();
+  if (!isSupabaseConfigured) return mockMovies().filter((m) => !m.deleted_at);
   const sb = requireSupabase();
-  const { data } = await sb.from("movies").select("*").order("year", { ascending: false });
+  const { data } = await sb.from("movies").select("*").is("deleted_at", null).order("year", { ascending: false });
   return (data ?? []).map((m: any) => ({
     id: m.id, title: m.title, year: m.year, genre: m.genre,
     rating: Number(m.rating), director: m.director, poster: m.poster_url,
+  }));
+}
+
+export async function listDeletedMovies(): Promise<Movie[]> {
+  if (!isSupabaseConfigured) return mockMovies().filter((m) => m.deleted_at);
+  const sb = requireSupabase();
+  const { data } = await sb.from("movies").select("*").not("deleted_at", "is", null).order("deleted_at", { ascending: false });
+  return (data ?? []).map((m: any) => ({
+    id: m.id, title: m.title, year: m.year, genre: m.genre,
+    rating: Number(m.rating), director: m.director, poster: m.poster_url, deleted_at: m.deleted_at,
   }));
 }
 
@@ -424,7 +434,12 @@ export async function addMovie(input: { title: string; year: number; genre: stri
 
 export async function deleteMovie(id: string): Promise<void> {
   if (!isSupabaseConfigured) { mockDeleteMovie(id); return; }
-  await requireSupabase().from("movies").delete().eq("id", id);
+  await requireSupabase().from("movies").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+}
+
+export async function restoreMovie(id: string): Promise<void> {
+  if (!isSupabaseConfigured) { mockRestoreMovie(id); return; }
+  await requireSupabase().from("movies").update({ deleted_at: null }).eq("id", id);
 }
 
 export async function deleteComment(id: string): Promise<void> {
