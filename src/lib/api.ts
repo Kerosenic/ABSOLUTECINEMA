@@ -481,6 +481,15 @@ export async function updateUsername(username: string): Promise<void> {
   await requireSupabase().from("profiles").update({ username }).eq("id", uid);
 }
 
+export async function deleteAccount(userId: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const sb = requireSupabase();
+  // Delete profile (cascade will handle related data via RLS/triggers)
+  await sb.from("profiles").delete().eq("id", userId);
+  // Call auth admin API to delete the user account
+  await sb.auth.admin.deleteUser(userId);
+}
+
 // ─── Storage ─────────────────────────────────────────────────────────────────
 // In mock mode uploads resolve to a local object URL so the UI still previews
 // the chosen image; in live mode they hit Supabase Storage and return the

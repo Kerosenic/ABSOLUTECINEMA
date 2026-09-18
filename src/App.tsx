@@ -76,6 +76,7 @@ import {
   useSetMemberRole,
   useSetReviewFeatured,
   useUpdateUsername,
+  useDeleteAccount,
 } from "./lib/queries"
 
 import { useRealtime } from "./lib/realtime"
@@ -92,7 +93,7 @@ type Page = "home" | "calendar" | "leaderboard" | "profile" | "admin"
 
 // Club code that unlocks the admin console. Client-side gate; see AdminGate.
 
-const ADMIN_CODE = "AMENICETULOSBA"
+const ADMIN_CODE = "AMENIC ETULOSBA"
 
 // ─── Persistent state ─────────────────────────────────────────────────────────
 
@@ -122,7 +123,7 @@ function usePersistentState<T>(key: string, makeInitial: () => T) {
 
 // ─── Toast ────────────────────────────────────────────────────────────────────
 
-type ToastMsg = { id: number text: string type: "success" | "info" }
+type ToastMsg = { id: number; text: string; type: "success" | "info" }
 
 function Toast({ toasts }: { toasts: ToastMsg[] }) {
   return (
@@ -230,7 +231,7 @@ function useFocusTrap(active: boolean) {
 
 // ─── Atoms ────────────────────────────────────────────────────────────────────
 
-function StarRating({ rating, max = 10 }: { rating: number max?: number }) {
+function StarRating({ rating, max = 10 }: { rating: number; max?: number }) {
   const filled = Math.round((rating / max) * 5)
 
   return (
@@ -3040,7 +3041,24 @@ function ProfilePage({
     (f) => !friendQ || f.username.toLowerCase().includes(friendQ.toLowerCase()),
   )
 
-  const username = session?.user.username ?? "CinemaVault"
+  const username = session?.user.username ?? "Profile"
+
+  const email = session?.user.email ?? ""
+
+  // Extract full name from email: firstname.lastname_number@tsinglan.org
+  const extractFullName = (email: string): string => {
+    if (!email) return ""
+    const localPart = email.split("@")[0]
+    // Remove trailing _number pattern
+    const withoutNumber = localPart.replace(/_\d+$/, "")
+    // Split by . and capitalize each part
+    const parts = withoutNumber.split(".")
+    return parts
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+      .join(" ")
+  }
+
+  const displayName = extractFullName(email) || username
 
   const netUpvotes = reviews.reduce((a, r) => a + r.upvotes - r.downvotes, 0)
 
@@ -3127,14 +3145,14 @@ function ProfilePage({
             ) : (
               <>
                 <h1 className="font-display font-900 text-3xl sm:text-4xl text-[var(--foreground)]">
-                  {username}
+                  {displayName}
                 </h1>
                 <Badge label={badgeFor(reviews.length)} />
               </>
             )}
           </div>
           <p className="text-sm text-[var(--muted-foreground)]">
-            Member since Jan 2023 · Brooklyn, NY
+            {email || "No email"}
           </p>
         </div>
         {editing ? (
@@ -3218,7 +3236,7 @@ function ProfilePage({
               />
             </svg>
             <h2 className="font-display font-900 text-2xl text-[var(--foreground)]">
-              CINEMA VAULT
+              PROFILE
             </h2>
           </div>
 
@@ -3607,11 +3625,12 @@ function AdminPage({
   announcements: Announcement[]
   members: Profile[]
 
-  onAddAnnouncement: (a: { title: string body: string }) => void
+  onAddAnnouncement: (a: { title: string; body: string }) => void
   onDeleteAnnouncement: (id: string) => void
 
   onSetMemberRole: (userId: string, role: "member" | "admin") => void
   onSetReviewFeatured: (id: string, featured: boolean, backgroundUrl?: string) => void
+  onDeleteAccount: (userId: string) => void
   session: Session | null
 }) {
   // Screening form
@@ -3622,6 +3641,8 @@ function AdminPage({
   const [bgModalOpen, setBgModalOpen] = useState(false)
   const [bgReviewId, setBgReviewId] = useState("")
   const [bgUrl, setBgUrl] = useState("")
+  const [bgUploading, setBgUploading] = useState(false)
+  const bgFileRef = useRef<HTMLInputElement>(null)
 
   const [sDate, setSDate] = useState("")
 
@@ -4119,7 +4140,9 @@ function AdminPage({
                 <button
                   onClick={() => {
                     if (r.featured) {
-                      onSetReviewFeatured(r.id, false)
+                      setBgReviewId(r.id)
+                      setBgUrl(r.background_url || "")
+                      setBgModalOpen(true)
                     } else {
                       setBgReviewId(r.id)
                       setBgUrl("")
@@ -4132,7 +4155,7 @@ function AdminPage({
                       : "text-[var(--muted-foreground)] hover:text-[var(--accent)]"
                   }`}
                 >
-                  {r.featured ? "Unfeature" : "Feature"}
+                  {r.featured ? "Edit" : "Feature"}
                 </button>
                 <button
                   onClick={() => onDeleteReview(r.id)}
@@ -4562,6 +4585,17 @@ function AdminPage({
                 >
                   {m.role === "admin" ? "Remove admin" : "Make admin"}
                 </button>
+                <button
+                  onClick={() => {
+                    if (confirm(`Delete account for ${m.username}? This cannot be undone.`)) {
+                      onDeleteAccount(m.id)
+                    }
+                  }}
+                  disabled={isSelf}
+                  className="text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] transition-colors disabled:opacity-40"
+                >
+                  Delete
+                </button>
               </div>
             )
           })}
@@ -4582,23 +4616,55 @@ function AdminPage({
             FEATURE REVIEW
           </h3>
           <p className="text-sm text-[var(--muted-foreground)] mb-4">
-            Add custom background image URL for hero banner. Leave empty to use movie poster.
+            Upload custom background image or paste URL for hero banner. Leave empty to use movie poster.
           </p>
+          <div className="flex gap-2 mb-3">
+            <input
+              value={bgUrl}
+              onChange={(e) => setBgUrl(e.target.value)}
+              placeholder="Background image URL (optional)"
+              className="flex-1 px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--accent)] transition-colors"
+            />
+            <button
+              type="button"
+              onClick={() => bgFileRef.current?.click()}
+              disabled={bgUploading}
+              className="px-4 shrink-0 text-xs font-semibold border border-[var(--border)] rounded-lg text-[var(--muted-foreground)] hover:border-[var(--accent)] hover:text-[var(--foreground)] transition-colors disabled:opacity-50"
+            >
+              {bgUploading ? "Uploading…" : "Upload"}
+            </button>
+          </div>
           <input
-            value={bgUrl}
-            onChange={(e) => setBgUrl(e.target.value)}
-            placeholder="Background image URL (optional)"
-            className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] placeholder:text-[var(--muted-foreground)] focus:outline-none focus:border-[var(--accent)] transition-colors mb-4"
+            ref={bgFileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={async (e) => {
+              const f = e.target.files?.[0]
+              if (f) {
+                setBgUploading(true)
+                try {
+                  const url = await onUploadPoster(f)
+                  setBgUrl(url)
+                } catch {
+                  /* parent toasts */
+                } finally {
+                  setBgUploading(false)
+                }
+              }
+              e.currentTarget.value = ""
+            }}
           />
-          <div className="flex gap-3">
+          <div className="flex gap-3 mb-3">
             <button
               onClick={() => {
                 onSetReviewFeatured(bgReviewId, true, bgUrl || undefined)
                 setBgModalOpen(false)
               }}
-              className="flex-1 btn-parallelogram px-4 py-2.5 bg-[var(--accent)] text-black font-bold hover:opacity-90 transition-all text-sm"
+              disabled={bgUploading}
+              className="flex-1 btn-parallelogram px-4 py-2.5 bg-[var(--accent)] text-black font-bold hover:opacity-90 transition-all text-sm disabled:opacity-40"
             >
-              FEATURE
+              SAVE
             </button>
             <button
               onClick={() => setBgModalOpen(false)}
@@ -4607,6 +4673,15 @@ function AdminPage({
               Cancel
             </button>
           </div>
+          <button
+            onClick={() => {
+              onSetReviewFeatured(bgReviewId, false)
+              setBgModalOpen(false)
+            }}
+            className="w-full px-4 py-2 border border-[var(--border)] rounded-lg text-xs font-semibold text-[var(--muted-foreground)] hover:text-[var(--accent)] hover:border-[var(--accent)] transition-colors"
+          >
+            Unfeature Review
+          </button>
         </div>
       </div>
     )}
@@ -4740,6 +4815,8 @@ export default function App() {
   const setReviewFeatured = useSetReviewFeatured()
 
   const updateUsername = useUpdateUsername()
+
+  const deleteAccount = useDeleteAccount()
 
   const setPageSafe = useCallback((p: Page) => setPage(p), [])
 
@@ -4888,7 +4965,7 @@ export default function App() {
     }
   }
 
-  const onAddAnnouncement = (a: { title: string body: string }) => {
+  const onAddAnnouncement = (a: { title: string; body: string }) => {
     addAnnouncement.mutate(a, { onSuccess: () => push("Announcement posted") })
   }
 
@@ -4927,6 +5004,12 @@ export default function App() {
 
         push("Profile updated")
       },
+    })
+  }
+
+  const onDeleteAccount = (userId: string) => {
+    deleteAccount.mutate(userId, {
+      onSuccess: () => push("Account deleted"),
     })
   }
 
@@ -5013,6 +5096,7 @@ export default function App() {
               onDeleteAnnouncement={onDeleteAnnouncement}
               onSetMemberRole={onSetMemberRole}
               onSetReviewFeatured={onSetReviewFeatured}
+              onDeleteAccount={onDeleteAccount}
               session={session}
             />
           ) : (

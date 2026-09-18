@@ -374,3 +374,11 @@ export function useUpdateUsername() {
     [["members"]],
   );
 }
+
+export function useDeleteAccount() {
+  return useOptimisticMutation(
+    (userId: string) => api.deleteAccount(userId),
+    [["members"]],
+    (userId, qc) => patch<Profile[]>(qc, ["members"], (old) => old.filter((m) => m.id !== userId)),
+  );
+}
