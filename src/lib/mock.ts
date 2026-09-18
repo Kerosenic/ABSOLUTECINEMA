@@ -13601,6 +13601,20 @@ export function mockDeleteReview(id: string) {
   )
 }
 
+export function mockUpdateReview(
+  id: string,
+  input: { movie_id: string; rating: number; body: string },
+) {
+  save(
+    KEYS.reviews,
+    mockReviews().map((r) =>
+      r.id === id
+        ? { ...r, movie_id: input.movie_id, rating: input.rating, body: input.body }
+        : r,
+    ),
+  )
+}
+
 export function mockAddMovie(input: {
   title: string
   year: number

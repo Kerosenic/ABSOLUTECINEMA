@@ -12,7 +12,7 @@ import {
   mockScreenings, mockVault, mockFollowing, mockNotifications, mockMarkNotificationsRead,
   mockVoteReview, mockAddReply, mockCreateReview, mockCastPollVote,
   mockToggleFavorite, mockSetVaultStatus, mockToggleFollow,
-  mockAddScreening, mockDeleteScreening, mockToggleScreeningFeatured, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview,
+  mockAddScreening, mockDeleteScreening, mockToggleScreeningFeatured, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview, mockUpdateReview,
   mockAddMovie, mockDeleteMovie, mockRestoreMovie, mockDeleteComment,
   mockMembers, mockSetMemberRole, mockAnnouncements, mockAddAnnouncement, mockDeleteAnnouncement,
   mockSetReviewFeatured, mockUpdateUsername, mockMovieRatings, mockRateMovie,
@@ -124,10 +124,12 @@ export async function listReviews(): Promise<Review[]> {
   const uid = await currentUserId();
   const [{ data: reviews }, { data: profiles }, { data: votes }] = await Promise.all([
     sb.from("reviews").select("*").order("created_at", { ascending: false }),
-    sb.from("profiles").select("id, username"),
+    sb.from("profiles").select("id, username, avatar_url"),
     sb.from("review_votes").select("review_id, direction, user_id"),
   ]);
-  const username = new Map<string, string>((profiles ?? []).map((p: any) => [p.id, p.username]));
+  const profile = new Map<string, { username: string; avatar_url: string | null }>(
+    (profiles ?? []).map((p: any) => [p.id, { username: p.username, avatar_url: p.avatar_url ?? null }])
+  );
   const tally = new Map<string, { up: number; down: number }>();
   for (const v of votes ?? []) {
     if (uid && v.user_id === uid) continue; // own vote is layered on via myReviewVotes
@@ -137,7 +139,8 @@ export async function listReviews(): Promise<Review[]> {
   }
   return (reviews ?? []).map((r: any) => ({
     id: r.id, movie_id: r.movie_id, author_id: r.author_id,
-    username: username.get(r.author_id) ?? "Member",
+    username: profile.get(r.author_id)?.username ?? "Member",
+    avatar_url: profile.get(r.author_id)?.avatar_url ?? null,
     rating: r.rating, body: r.body, created_at: r.created_at,
     upvotes: tally.get(r.id)?.up ?? 0, downvotes: tally.get(r.id)?.down ?? 0,
     featured: r.featured ?? false,
@@ -150,14 +153,18 @@ export async function listThreads(): Promise<Record<string, Reply[]>> {
   const sb = requireSupabase();
   const [{ data: comments }, { data: profiles }] = await Promise.all([
     sb.from("comments").select("*").order("created_at", { ascending: true }),
-    sb.from("profiles").select("id, username"),
+    sb.from("profiles").select("id, username, avatar_url"),
   ]);
-  const username = new Map<string, string>((profiles ?? []).map((p: any) => [p.id, p.username]));
+  const profile = new Map<string, { username: string; avatar_url: string | null }>(
+    (profiles ?? []).map((p: any) => [p.id, { username: p.username, avatar_url: p.avatar_url ?? null }])
+  );
   const out: Record<string, Reply[]> = {};
   for (const c of comments ?? []) {
     (out[c.review_id] ??= []).push({
       id: c.id, review_id: c.review_id,
-      username: username.get(c.author_id) ?? "Member", body: c.body, created_at: c.created_at,
+      username: profile.get(c.author_id)?.username ?? "Member",
+      avatar_url: profile.get(c.author_id)?.avatar_url ?? null,
+      body: c.body, created_at: c.created_at,
     });
   }
   return out;
@@ -456,6 +463,17 @@ export async function deletePoll(id: string): Promise<void> {
 export async function deleteReview(id: string): Promise<void> {
   if (!isSupabaseConfigured) { mockDeleteReview(id); return; }
   await requireSupabase().from("reviews").delete().eq("id", id);
+}
+
+export async function updateReview(id: string, input: { movie_id: string; rating: number; body: string }): Promise<void> {
+  if (!isSupabaseConfigured) { mockUpdateReview(id, input); return; }
+  const sb = requireSupabase();
+  const uid = await currentUserId();
+  if (!uid) throw new Error("Sign in to edit a review");
+  await sb.from("reviews")
+    .update({ rating: input.rating, body: input.body, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .eq("author_id", uid);
 }
 
 export async function markNotificationsRead(): Promise<void> {

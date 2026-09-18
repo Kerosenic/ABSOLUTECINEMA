@@ -38,6 +38,7 @@ export interface Review {
   movie_id: string;
   author_id: string;
   username: string;
+  avatar_url?: string | null;
   rating: number;
   body: string;
   upvotes: number;
@@ -51,6 +52,7 @@ export interface Reply {
   id: string;
   review_id: string;
   username: string;
+  avatar_url?: string | null;
   body: string;
   created_at: string;
 }

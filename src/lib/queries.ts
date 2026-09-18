@@ -334,6 +334,18 @@ export function useDeleteReview() {
   );
 }
 
+export function useUpdateReview() {
+  return useOptimisticMutation(
+    (args: { id: string; movie_id: string; rating: number; body: string }) =>
+      api.updateReview(args.id, { movie_id: args.movie_id, rating: args.rating, body: args.body }),
+    [["reviews"], ["leaderboard"]],
+    (args, qc) =>
+      patch<Review[]>(qc, ["reviews"], (old) =>
+        old.map((r) => (r.id === args.id ? { ...r, rating: args.rating, body: args.body } : r)),
+      ),
+  );
+}
+
 export function useMarkNotificationsRead() {
   return useOptimisticMutation(
     () => api.markNotificationsRead(),

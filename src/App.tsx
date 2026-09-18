@@ -68,6 +68,7 @@ import {
   useTogglePoll,
   useDeletePoll,
   useDeleteReview,
+  useUpdateReview,
   useNotifications,
   useMarkNotificationsRead,
   useAddMovie,
@@ -1609,6 +1610,8 @@ function ReviewCard({
   onVote,
   onReply,
   movies,
+  isOwner,
+  onEdit,
 }: {
   review: Review
   replies: Reply[]
@@ -1616,6 +1619,8 @@ function ReviewCard({
   onVote: (id: string, dir: "up" | "down") => void
   onReply: (id: string, body: string) => void
   movies: Movie[]
+  isOwner: boolean
+  onEdit: () => void
 }) {
   const movie = movies.find((m) => m.id === review.movie_id)
 
@@ -1672,7 +1677,7 @@ function ReviewCard({
             </div>
           </div>
           <div className="flex items-center gap-2 mb-2">
-            <Avt initials={initials(review.username)} size="xs" />
+            <Avt initials={initials(review.username)} src={review.avatar_url} size="xs" />
             <span className="text-xs text-[var(--muted-foreground)]">
               <span className="text-[var(--foreground)] font-semibold">
                 {review.username}
@@ -1737,6 +1742,28 @@ function ReviewCard({
           </svg>
           {down}
         </button>
+        {isOwner && (
+          <button
+            onClick={onEdit}
+            aria-label="Edit review"
+            className="flex items-center gap-1.5 text-sm font-medium transition-colors text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+          >
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125"
+              />
+            </svg>
+            Edit
+          </button>
+        )}
         <button
           onClick={() => setShowReplies(!showReplies)}
           className={`flex items-center gap-1.5 text-sm font-medium transition-colors ml-auto ${
@@ -1766,7 +1793,7 @@ function ReviewCard({
         <div className="border-t border-[var(--border)] px-4 pt-3 pb-4 flex flex-col gap-3 bg-[var(--muted)]/40">
           {replies.map((r) => (
             <div key={r.id} className="flex gap-2.5 items-start">
-              <Avt initials={initials(r.username)} size="xs" />
+              <Avt initials={initials(r.username)} src={r.avatar_url} size="xs" />
               <div className="flex-1 bg-[var(--card)] rounded-xl px-3 py-2 border border-[var(--border)]">
                 <p className="text-xs font-semibold text-[var(--foreground)] mb-0.5">
                   {r.username}
@@ -1815,17 +1842,21 @@ function WriteReviewModal({
   onSubmit,
   movies,
   initialMovieId,
+  editing,
 }: {
   onClose: () => void
   onSubmit: (movieId: string, rating: number, body: string) => void
   movies: Movie[]
   initialMovieId?: string
+  editing?: Review
 }) {
-  const [rating, setRating] = useState(0)
+  const isEditing = !!editing
 
-  const [body, setBody] = useState("")
+  const [rating, setRating] = useState(editing?.rating ?? 0)
 
-  const [movieId, setMovieId] = useState(initialMovieId ?? "")
+  const [body, setBody] = useState(editing?.body ?? "")
+
+  const [movieId, setMovieId] = useState(editing?.movie_id ?? initialMovieId ?? "")
 
   const [query, setQuery] = useState("")
 
@@ -1877,7 +1908,7 @@ function WriteReviewModal({
         ref={ref}
         role="dialog"
         aria-modal="true"
-        aria-label="Write a review"
+        aria-label={isEditing ? "Edit review" : "Write a review"}
         className="relative bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 w-full max-w-md shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
@@ -1901,7 +1932,7 @@ function WriteReviewModal({
           </svg>
         </button>
         <h2 className="font-display font-900 text-2xl text-[var(--foreground)] mb-5">
-          WRITE A REVIEW
+          {isEditing ? "EDIT REVIEW" : "WRITE A REVIEW"}
         </h2>
         <div className="flex flex-col gap-4">
           <div className="relative">
@@ -1911,12 +1942,14 @@ function WriteReviewModal({
             <input
               type="text"
               value={selected ? selected.title : query}
+              readOnly={isEditing}
               onChange={(e) => {
+                if (isEditing) return
                 setQuery(e.target.value)
                 setOpen(true)
                 setFieldErrors((f) => ({ ...f, movie_id: "" }))
               }}
-              onFocus={() => setOpen(true)}
+              onFocus={() => !isEditing && setOpen(true)}
               onBlur={() => setTimeout(() => setOpen(false), 150)}
               placeholder="Search movies…"
               aria-invalid={!!fieldErrors.movie_id}
@@ -2014,7 +2047,7 @@ function WriteReviewModal({
             disabled={!movieId || !rating || !body.trim()}
             className="btn-parallelogram w-full py-3 bg-[var(--accent)] text-black font-bold transition-all text-sm tracking-wide disabled:opacity-40 hover:opacity-90"
           >
-            PUBLISH REVIEW
+            {isEditing ? "SAVE CHANGES" : "PUBLISH REVIEW"}
           </button>
         </div>
       </div>
@@ -2382,6 +2415,8 @@ function HomePage({
   onToggleVault,
   onRate,
   onWriteReview,
+  onEditReview,
+  myId,
   announcements,
   screenings,
 }: {
@@ -2402,6 +2437,8 @@ function HomePage({
   onToggleVault: (id: string, tab: VaultTab) => void
   onRate: (movieId: string, rating: number) => void
   onWriteReview: (movieId: string, rating: number, body: string) => void
+  onEditReview: (id: string, movieId: string, rating: number, body: string) => void
+  myId: string
 
   announcements: Announcement[]
   screenings: Screening[]
@@ -2419,6 +2456,8 @@ function HomePage({
   const [rateTarget, setRateTarget] = useState<Movie | null>(null)
 
   const [reviewTarget, setReviewTarget] = useState<Movie | null>(null)
+
+  const [editingReview, setEditingReview] = useState<Review | null>(null)
 
   const [showSearchReviews, setShowSearchReviews] = useState(false)
 
@@ -2508,6 +2547,18 @@ function HomePage({
           onSubmit={(movieId, rating, body) => {
             onWriteReview(movieId, rating, body)
             setReviewTarget(null)
+          }}
+          movies={movies}
+        />
+      )}
+
+      {editingReview && (
+        <WriteReviewModal
+          editing={editingReview}
+          onClose={() => setEditingReview(null)}
+          onSubmit={(movieId, rating, body) => {
+            onEditReview(editingReview.id, movieId, rating, body)
+            setEditingReview(null)
           }}
           movies={movies}
         />
@@ -2624,6 +2675,8 @@ function HomePage({
               onVote={onVote}
               onReply={onReply}
               movies={movies}
+              isOwner={myId !== "" && myId === r.author_id}
+              onEdit={() => setEditingReview(r)}
             />
           ))}
         </div>
@@ -5165,6 +5218,8 @@ export default function App() {
 
   const deleteReview = useDeleteReview()
 
+  const updateReview = useUpdateReview()
+
   const addMovie = useAddMovie()
 
   const deleteMovie = useDeleteMovie()
@@ -5312,6 +5367,17 @@ export default function App() {
     deleteReview.mutate(id, { onSuccess: () => push("Review removed") })
   }
 
+  const onEditReview = (id: string, movieId: string, rating: number, body: string) => {
+    updateReview.mutate(
+      { id, movie_id: movieId, rating, body },
+      {
+        onSuccess: () => push("Review updated!"),
+
+        onError: () => push("Couldn't update review", "info"),
+      },
+    )
+  }
+
   const onAddMovie = (m: {
     title: string
     year: number
@@ -5455,6 +5521,8 @@ export default function App() {
                 onToggleVault={onToggleVault}
                 onRate={onRate}
                 onWriteReview={onWriteReview}
+                onEditReview={onEditReview}
+                myId={myId}
                 announcements={announcementsData}
                 screenings={screeningsData}
               />
