@@ -6,7 +6,9 @@ import type {
   Reply,
   Poll,
   Screening,
+  Vault,
   VaultTab,
+  MovieRating,
   LeaderboardRow,
   Profile,
   Session,
@@ -55,7 +57,9 @@ import {
   useVoteReview,
   useAddReply,
   useCastPollVote,
-  useToggleFavorite,
+  useMovieRatings,
+  useRateMovie,
+  useSetVaultStatus,
   useToggleFollow,
   useAddScreening,
   useDeleteScreening,
@@ -231,6 +235,21 @@ function useFocusTrap(active: boolean) {
 }
 
 // ─── Atoms ────────────────────────────────────────────────────────────────────
+
+// Average of a movie's quick ratings + every review's star rating. Null when
+// nobody has rated it yet (renders as "N/A" on the library card).
+function avgRating(
+  reviews: Review[],
+  ratings: MovieRating[],
+  movieId: string,
+): { avg: number | null; count: number } {
+  const vals = [
+    ...reviews.filter((r) => r.movie_id === movieId).map((r) => r.rating),
+    ...ratings.filter((r) => r.movie_id === movieId).map((r) => r.rating),
+  ]
+  if (vals.length === 0) return { avg: null, count: 0 }
+  return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length }
+}
 
 function StarRating({ rating, max = 10 }: { rating: number; max?: number }) {
   const filled = Math.round((rating / max) * 5)
@@ -812,6 +831,51 @@ function NotificationBell({
   )
 }
 
+// ─── Loading ──────────────────────────────────────────────────────────────────
+
+function LoadingBar() {
+  return <div className="ac-loading-bar" aria-hidden="true" />
+}
+
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen" aria-hidden="true">
+      {/* Hero skeleton */}
+      <div className="relative h-[88vh] min-h-[560px] overflow-hidden">
+        <div className="ac-skeleton absolute inset-0" />
+        <div className="absolute inset-0 bg-gradient-to-r from-[var(--background)] via-[var(--background)]/60 to-transparent" />
+        <div className="relative h-full max-w-7xl mx-auto px-4 sm:px-6 flex flex-col justify-end pb-20">
+          <div className="max-w-lg flex flex-col gap-4">
+            <div className="ac-skeleton h-4 w-40 rounded" />
+            <div className="ac-skeleton h-20 w-full max-w-md rounded" />
+            <div className="ac-skeleton h-6 w-64 rounded" />
+            <div className="ac-skeleton h-16 w-full max-w-md rounded" />
+            <div className="flex gap-3">
+              <div className="ac-skeleton h-10 w-40 rounded" />
+              <div className="ac-skeleton h-10 w-40 rounded" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Row skeletons */}
+      {["", ""].map((_, i) => (
+        <section key={i} className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+          <div className="ac-skeleton h-10 w-64 rounded mb-7" />
+          <div className="flex gap-3 overflow-hidden">
+            {Array.from({ length: 8 }).map((_, j) => (
+              <div
+                key={j}
+                className="ac-skeleton w-32 sm:w-36 aspect-[2/3] rounded-xl flex-shrink-0"
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
 // ─── Navbar ───────────────────────────────────────────────────────────────────
 
 function NavBar({
@@ -1122,9 +1186,7 @@ function HeroBanner({
 }) {
   const [activeIdx, setActiveIdx] = useState(0)
 
-  const slides = reviews.filter((r) => r.featured)
-
-  const featured = slides.length > 0 ? slides : reviews.slice(0, 3)
+  const featured = reviews.filter((r) => r.featured)
 
   useEffect(() => {
     if (featured.length <= 1) return
@@ -1752,16 +1814,18 @@ function WriteReviewModal({
   onClose,
   onSubmit,
   movies,
+  initialMovieId,
 }: {
   onClose: () => void
   onSubmit: (movieId: string, rating: number, body: string) => void
   movies: Movie[]
+  initialMovieId?: string
 }) {
   const [rating, setRating] = useState(0)
 
   const [body, setBody] = useState("")
 
-  const [movieId, setMovieId] = useState("")
+  const [movieId, setMovieId] = useState(initialMovieId ?? "")
 
   const [query, setQuery] = useState("")
 
@@ -1958,6 +2022,84 @@ function WriteReviewModal({
   )
 }
 
+// ─── Rate Movie Modal ─────────────────────────────────────────────────────────
+
+function RateModal({
+  movie,
+  current,
+  onClose,
+  onSubmit,
+}: {
+  movie: Movie
+  current: number | null
+  onClose: () => void
+  onSubmit: (v: number) => void
+}) {
+  const [value, setValue] = useState(current ?? 0)
+
+  const ref = useFocusTrap(true)
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && onClose()
+    window.addEventListener("keydown", esc)
+    return () => window.removeEventListener("keydown", esc)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" />
+      <div
+        ref={ref}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Rate movie"
+        className="relative bg-[var(--card)] border border-[var(--border)] rounded-2xl p-6 w-full max-w-sm shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-4 right-4 text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
+        >
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+        <h2 className="font-display font-900 text-2xl text-[var(--foreground)] mb-1">
+          RATE
+        </h2>
+        <p className="text-sm text-[var(--muted-foreground)] mb-5">
+          {movie.title} ({movie.year})
+        </p>
+        <InteractiveStars value={value} onChange={setValue} />
+        <div className="text-sm font-bold text-[var(--accent)] mt-2 h-5">
+          {value > 0 ? `${value}/10` : ""}
+        </div>
+        <button
+          onClick={() => value > 0 && onSubmit(value)}
+          disabled={!value}
+          className="btn-parallelogram w-full py-3 bg-[var(--accent)] text-black font-bold transition-all text-sm tracking-wide disabled:opacity-40 hover:opacity-90"
+        >
+          {current != null ? "UPDATE RATING" : "SUBMIT RATING"}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ─── Poll Card ────────────────────────────────────────────────────────────────
 
 function PollCard({
@@ -2104,13 +2246,50 @@ function PollCard({
 
 function LibCard({
   movie,
-  saved,
-  onToggle,
+  avg,
+  count,
+  vault,
+  onToggleVault,
+  onRate,
+  onReview,
 }: {
   movie: Movie
-  saved: boolean
-  onToggle: () => void
+  avg: number | null
+  count: number
+  vault: Vault
+  onToggleVault: (id: string, tab: VaultTab) => void
+  onRate: () => void
+  onReview: () => void
 }) {
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const watched = vault.watched.includes(movie.id)
+
+  const plantowatch = vault.plantowatch.includes(movie.id)
+
+  const favorite = vault.favorites.includes(movie.id)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const close = () => setMenuOpen(false)
+    window.addEventListener("click", close)
+    return () => window.removeEventListener("click", close)
+  }, [menuOpen])
+
+  const item = (label: string, action: () => void) => (
+    <button
+      key={label}
+      onClick={(e) => {
+        e.stopPropagation()
+        setMenuOpen(false)
+        action()
+      }}
+      className="w-full text-left px-3 py-2 text-sm text-[var(--foreground)] hover:bg-[var(--muted)] transition-colors whitespace-nowrap"
+    >
+      {label}
+    </button>
+  )
+
   return (
     <div className="group relative cursor-pointer">
       <div className="aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] relative">
@@ -2130,43 +2309,57 @@ function LibCard({
             {movie.title}
           </p>
           <div className="flex items-center justify-between mt-1">
-            <span className="text-[var(--star)] text-xs font-bold">
-              ★ {movie.rating}
-            </span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                onToggle()
-              }}
-              aria-label={saved ? "Remove from favorites" : "Add to favorites"}
-              className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
-                saved
-                  ? "bg-[var(--accent)]"
-                  : "bg-white/10 hover:bg-[var(--accent)]"
+            <span
+              className={`text-xs font-bold ${
+                avg === null ? "text-white/60" : "text-[var(--star)]"
               }`}
             >
-              <svg
-                className="w-3 h-3 text-white"
-                fill={saved ? "currentColor" : "none"}
-                stroke="currentColor"
-                strokeWidth={2}
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z"
-                />
-              </svg>
-            </button>
+              {avg === null ? "N/A" : `★ ${avg.toFixed(1)}`}
+            </span>
+            {count > 0 && (
+              <span className="text-white/50 text-[10px]">({count})</span>
+            )}
           </div>
         </div>
-        <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
           <span className="text-[9px] px-1.5 py-0.5 rounded bg-black/70 text-white font-medium">
             {movie.genre}
           </span>
         </div>
       </div>
+      <button
+        onClick={(e) => {
+          e.stopPropagation()
+          setMenuOpen((o) => !o)
+        }}
+        aria-label="More options"
+        className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-black/70 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 hover:bg-[var(--accent)] transition-all z-20"
+      >
+        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+          <circle cx="5" cy="12" r="1.7" />
+          <circle cx="12" cy="12" r="1.7" />
+          <circle cx="19" cy="12" r="1.7" />
+        </svg>
+      </button>
+      {menuOpen && (
+        <div
+          className="absolute right-1.5 top-9 z-30 w-48 bg-[var(--card)] border border-[var(--border)] rounded-xl shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {item(
+            plantowatch ? "Remove from Plan to Watch" : "Add to Plan to Watch",
+            () => onToggleVault(movie.id, "plantowatch"),
+          )}
+          {item(watched ? "Remove from Watched" : "Add to Watched", () =>
+            onToggleVault(movie.id, "watched"),
+          )}
+          {item(favorite ? "Remove from Favorites" : "Add to Favorites", () =>
+            onToggleVault(movie.id, "favorites"),
+          )}
+          {item("Rate", onRate)}
+          {item("Review", onReview)}
+        </div>
+      )}
     </div>
   )
 }
@@ -2183,8 +2376,11 @@ function HomePage({
   polls,
   pollVotes,
   onPollVote,
-  favorites,
-  onToggleFavorite,
+  vault,
+  ratings,
+  myRatings,
+  onToggleVault,
+  onRate,
   onWriteReview,
   announcements,
   screenings,
@@ -2200,8 +2396,11 @@ function HomePage({
   pollVotes: Record<string, number>
   onPollVote: (pollId: string, idx: number) => void
 
-  favorites: string[]
-  onToggleFavorite: (id: string) => void
+  vault: Vault
+  ratings: MovieRating[]
+  myRatings: Record<string, number>
+  onToggleVault: (id: string, tab: VaultTab) => void
+  onRate: (movieId: string, rating: number) => void
   onWriteReview: (movieId: string, rating: number, body: string) => void
 
   announcements: Announcement[]
@@ -2216,6 +2415,10 @@ function HomePage({
   const [query, setQuery] = useState("")
 
   const [showWriteReview, setShowWriteReview] = useState(false)
+
+  const [rateTarget, setRateTarget] = useState<Movie | null>(null)
+
+  const [reviewTarget, setReviewTarget] = useState<Movie | null>(null)
 
   const [showSearchReviews, setShowSearchReviews] = useState(false)
 
@@ -2242,7 +2445,10 @@ function HomePage({
       if (!isNaN(Number(year)) && m.year !== Number(year)) return false
     }
 
-    if (rating !== "All" && m.rating < parseFloat(rating)) return false
+    if (rating !== "All") {
+      const { avg } = avgRating(reviews, ratings, m.id)
+      if (avg === null || avg < parseFloat(rating)) return false
+    }
 
     if (
       query &&
@@ -2278,6 +2484,30 @@ function HomePage({
           onSubmit={(movieId, rating, body) => {
             onWriteReview(movieId, rating, body)
             setShowWriteReview(false)
+          }}
+          movies={movies}
+        />
+      )}
+
+      {rateTarget && (
+        <RateModal
+          movie={rateTarget}
+          current={myRatings[rateTarget.id] ?? null}
+          onClose={() => setRateTarget(null)}
+          onSubmit={(v) => {
+            onRate(rateTarget.id, v)
+            setRateTarget(null)
+          }}
+        />
+      )}
+
+      {reviewTarget && (
+        <WriteReviewModal
+          initialMovieId={reviewTarget.id}
+          onClose={() => setReviewTarget(null)}
+          onSubmit={(movieId, rating, body) => {
+            onWriteReview(movieId, rating, body)
+            setReviewTarget(null)
           }}
           movies={movies}
         />
@@ -2472,14 +2702,21 @@ function HomePage({
           ))}
         </div>
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-3">
-          {filtered.slice(0, visibleCount).map((m) => (
-            <LibCard
-              key={m.id}
-              movie={m}
-              saved={favorites.includes(m.id)}
-              onToggle={() => onToggleFavorite(m.id)}
-            />
-          ))}
+          {filtered.slice(0, visibleCount).map((m) => {
+            const { avg, count } = avgRating(reviews, ratings, m.id)
+            return (
+              <LibCard
+                key={m.id}
+                movie={m}
+                avg={avg}
+                count={count}
+                vault={vault}
+                onToggleVault={onToggleVault}
+                onRate={() => setRateTarget(m)}
+                onReview={() => setReviewTarget(m)}
+              />
+            )
+          })}
           {filtered.length === 0 && (
             <div className="col-span-full py-20 text-center">
               <p className="font-display font-900 text-3xl text-[var(--muted-foreground)]">
@@ -4906,7 +5143,11 @@ export default function App() {
 
   const castPollVote = useCastPollVote()
 
-  const toggleFavorite = useToggleFavorite()
+  const movieRatings = useMovieRatings()
+
+  const rateMovie = useRateMovie()
+
+  const setVaultStatus = useSetVaultStatus()
 
   const toggleFollow = useToggleFollow()
 
@@ -4970,6 +5211,16 @@ export default function App() {
     favorites: [],
   }
 
+  const movieRatingsData = movieRatings.data ?? []
+
+  const myId = session?.user.id ?? ""
+
+  const myRatings: Record<string, number> = {}
+
+  for (const r of movieRatingsData) {
+    if (r.user_id === myId) myRatings[r.movie_id] = r.rating
+  }
+
   const followingData = following.data ?? []
 
   const userVotesData = userVotes.data ?? {}
@@ -4977,6 +5228,13 @@ export default function App() {
   const pollVotesData = pollVotes.data ?? {}
 
   const announcementsData = announcements.data ?? []
+
+  const loading =
+    movies.isLoading ||
+    reviews.isLoading ||
+    screenings.isLoading ||
+    polls.isLoading ||
+    announcements.isLoading
 
   const onVote = (id: string, dir: "up" | "down") => {
     voteReview.mutate({ id, dir })
@@ -5004,9 +5262,15 @@ export default function App() {
     })
   }
 
-  const onToggleFavorite = (movieId: string) => {
-    toggleFavorite.mutate(movieId, {
+  const onToggleVault = (movieId: string, tab: VaultTab) => {
+    setVaultStatus.mutate({ movieId, status: tab }, {
       onSuccess: () => push("Updated Cinema Vault"),
+    })
+  }
+
+  const onRate = (movieId: string, rating: number) => {
+    rateMovie.mutate({ movieId, rating }, {
+      onSuccess: () => push("Rating saved!"),
     })
   }
 
@@ -5157,6 +5421,7 @@ export default function App() {
     >
       {showSignIn && <SignInModal onClose={() => setShowSignIn(false)} />}
       <Toast toasts={toasts} />
+      {loading && <LoadingBar />}
 
       <NavBar
         page={page}
@@ -5169,80 +5434,89 @@ export default function App() {
       />
 
       <main>
-        {page === "home" && (
-          <HomePage
-            movies={moviesData}
-            reviews={reviewsData}
-            threads={threadsData}
-            userVotes={userVotesData}
-            onVote={onVote}
-            onReply={onReply}
-            polls={pollsData}
-            pollVotes={pollVotesData}
-            onPollVote={onPollVote}
-            favorites={vaultData.favorites}
-            onToggleFavorite={onToggleFavorite}
-            onWriteReview={onWriteReview}
-            announcements={announcementsData}
-            screenings={screeningsData}
-          />
+        {loading ? (
+          <LoadingScreen />
+        ) : (
+          <>
+            {page === "home" && (
+              <HomePage
+                movies={moviesData}
+                reviews={reviewsData}
+                threads={threadsData}
+                userVotes={userVotesData}
+                onVote={onVote}
+                onReply={onReply}
+                polls={pollsData}
+                pollVotes={pollVotesData}
+                onPollVote={onPollVote}
+                vault={vaultData}
+                ratings={movieRatingsData}
+                myRatings={myRatings}
+                onToggleVault={onToggleVault}
+                onRate={onRate}
+                onWriteReview={onWriteReview}
+                announcements={announcementsData}
+                screenings={screeningsData}
+              />
+            )}
+            {page === "calendar" && (
+              <CalendarPage screenings={screeningsData} push={push} />
+            )}
+            {page === "leaderboard" && (
+              <LeaderboardPage leaderboard={leaderboardData} />
+            )}
+            {page === "profile" && (
+              <ProfilePage
+                movies={moviesData}
+                reviews={reviewsData}
+                vault={vaultData}
+                members={membersData}
+                following={followingData}
+                onToggleFollow={onToggleFollow}
+                session={session}
+                onUploadAvatar={onUploadAvatar}
+                onUpdateUsername={onUpdateUsername}
+              />
+            )}
+            {page === "admin" &&
+              (adminUnlocked && session ? (
+                <AdminPage
+                  screenings={screeningsData}
+                  onAddScreening={onAddScreening}
+                  onDeleteScreening={onDeleteScreening}
+                  onToggleScreeningFeatured={onToggleScreeningFeatured}
+                  polls={pollsData}
+                  onAddPoll={onAddPoll}
+                  onTogglePoll={onTogglePoll}
+                  onDeletePoll={onDeletePoll}
+                  reviews={reviewsData}
+                  movies={moviesData}
+                  deletedMovies={deletedMoviesData}
+                  threads={threadsData}
+                  onDeleteReview={onDeleteReview}
+                  onAddMovie={onAddMovie}
+                  onDeleteMovie={onDeleteMovie}
+                  onRestoreMovie={onRestoreMovie}
+                  onDeleteComment={onDeleteComment}
+                  onUploadPoster={onUploadPoster}
+                  announcements={announcementsData}
+                  members={membersData}
+                  onAddAnnouncement={onAddAnnouncement}
+                  onDeleteAnnouncement={onDeleteAnnouncement}
+                  onSetMemberRole={onSetMemberRole}
+                  onSetReviewFeatured={onSetReviewFeatured}
+                  onDeleteAccount={onDeleteAccount}
+                  session={session}
+                />
+              ) : (
+                <AdminGate
+                  session={session}
+                  onUnlock={unlockAdmin}
+                  onSignIn={() => setShowSignIn(true)}
+                />
+              ))}
+          </>
         )}
-        {page === "calendar" && (
-          <CalendarPage screenings={screeningsData} push={push} />
-        )}
-        {page === "leaderboard" && (
-          <LeaderboardPage leaderboard={leaderboardData} />
-        )}
-        {page === "profile" && (
-          <ProfilePage
-            movies={moviesData}
-            reviews={reviewsData}
-            vault={vaultData}
-            members={membersData}
-            following={followingData}
-            onToggleFollow={onToggleFollow}
-            session={session}
-            onUploadAvatar={onUploadAvatar}
-            onUpdateUsername={onUpdateUsername}
-          />
-        )}
-        {page === "admin" &&
-          (adminUnlocked && session ? (
-            <AdminPage
-              screenings={screeningsData}
-              onAddScreening={onAddScreening}
-              onDeleteScreening={onDeleteScreening}
-              onToggleScreeningFeatured={onToggleScreeningFeatured}
-              polls={pollsData}
-              onAddPoll={onAddPoll}
-              onTogglePoll={onTogglePoll}
-              onDeletePoll={onDeletePoll}
-              reviews={reviewsData}
-              movies={moviesData}
-              deletedMovies={deletedMoviesData}
-              threads={threadsData}
-              onDeleteReview={onDeleteReview}
-              onAddMovie={onAddMovie}
-              onDeleteMovie={onDeleteMovie}
-              onRestoreMovie={onRestoreMovie}
-              onDeleteComment={onDeleteComment}
-              onUploadPoster={onUploadPoster}
-              announcements={announcementsData}
-              members={membersData}
-              onAddAnnouncement={onAddAnnouncement}
-              onDeleteAnnouncement={onDeleteAnnouncement}
-              onSetMemberRole={onSetMemberRole}
-              onSetReviewFeatured={onSetReviewFeatured}
-              onDeleteAccount={onDeleteAccount}
-              session={session}
-            />
-          ) : (
-            <AdminGate
-              session={session}
-              onUnlock={unlockAdmin}
-              onSignIn={() => setShowSignIn(true)}
-            />
-          ))}
       </main>
 
       <Footer setPage={setPageSafe} />

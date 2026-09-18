@@ -92,3 +92,38 @@ html, body, #root {
   position: relative;
   left: 0; transform: none;
 }
+
+/* ─── Loading ──────────────────────────────────────────────────────────────── */
+@keyframes ac-progress {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(400%); }
+}
+.ac-loading-bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  z-index: 90;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ac-loading-bar::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 25%;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: ac-progress 1s linear infinite;
+}
+
+@keyframes ac-shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+.ac-skeleton {
+  background: linear-gradient(90deg, var(--muted) 25%, var(--border) 37%, var(--muted) 63%);
+  background-size: 200% 100%;
+  animation: ac-shimmer 1.4s ease infinite;
+}

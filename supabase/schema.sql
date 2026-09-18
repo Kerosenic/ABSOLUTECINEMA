@@ -49,6 +49,17 @@ create table if not exists public.reviews (
   updated_at timestamptz not null default now()
 );
 alter table public.reviews add column if not exists featured boolean not null default false;
+alter table public.reviews add column if not exists background_url text;
+
+-- ─── movie_ratings ──────────────────────────────────────────────────────
+create table if not exists public.movie_ratings (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  movie_id text not null references public.movies(id) on delete cascade,
+  rating int not null check (rating between 1 and 10),
+  created_at timestamptz not null default now(),
+  unique (user_id, movie_id)
+);
 
 -- ─── review_votes ───────────────────────────────────────────────────────
 create table if not exists public.review_votes (
@@ -189,6 +200,7 @@ alter table public.poll_options   enable row level security;
 alter table public.poll_votes     enable row level security;
 alter table public.screenings     enable row level security;
 alter table public.library_entries enable row level security;
+alter table public.movie_ratings  enable row level security;
 alter table public.friendships    enable row level security;
 alter table public.rsvps          enable row level security;
 alter table public.notifications  enable row level security;
@@ -280,6 +292,16 @@ drop policy if exists "library_entries owner update" on public.library_entries;
 create policy "library_entries owner update" on public.library_entries for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 drop policy if exists "library_entries owner delete" on public.library_entries;
 create policy "library_entries owner delete" on public.library_entries for delete using (auth.uid() = user_id);
+
+-- movie_ratings: public read, owner write (one rating per user per movie)
+drop policy if exists "movie_ratings public read" on public.movie_ratings;
+create policy "movie_ratings public read" on public.movie_ratings for select using (true);
+drop policy if exists "movie_ratings owner insert" on public.movie_ratings;
+create policy "movie_ratings owner insert" on public.movie_ratings for insert with check (auth.uid() = user_id);
+drop policy if exists "movie_ratings owner update" on public.movie_ratings;
+create policy "movie_ratings owner update" on public.movie_ratings for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "movie_ratings owner delete" on public.movie_ratings;
+create policy "movie_ratings owner delete" on public.movie_ratings for delete using (auth.uid() = user_id);
 
 -- friendships: involved users read/write
 drop policy if exists "friendships involved read" on public.friendships;

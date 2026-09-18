@@ -4,7 +4,7 @@
 
 import { isSupabaseConfigured, requireSupabase } from "./supabase";
 import type {
-  Movie, Review, Reply, Poll, Screening, Vault, VaultTab, LeaderboardRow, Profile, Session, Notification, Announcement,
+  Movie, Review, Reply, Poll, Screening, Vault, VaultTab, LeaderboardRow, Profile, Session, Notification, Announcement, MovieRating,
 } from "./types";
 import {
   MOCK_USER, LEADERBOARD,
@@ -15,7 +15,7 @@ import {
   mockAddScreening, mockDeleteScreening, mockToggleScreeningFeatured, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview,
   mockAddMovie, mockDeleteMovie, mockRestoreMovie, mockDeleteComment,
   mockMembers, mockSetMemberRole, mockAnnouncements, mockAddAnnouncement, mockDeleteAnnouncement,
-  mockSetReviewFeatured, mockUpdateUsername,
+  mockSetReviewFeatured, mockUpdateUsername, mockMovieRatings, mockRateMovie,
 } from "./mock";
 
 function to12h(t: string): string {
@@ -109,6 +109,15 @@ export async function listDeletedMovies(): Promise<Movie[]> {
   }));
 }
 
+export async function listMovieRatings(): Promise<MovieRating[]> {
+  if (!isSupabaseConfigured) return mockMovieRatings();
+  const sb = requireSupabase();
+  const { data } = await sb.from("movie_ratings").select("id, movie_id, user_id, rating");
+  return (data ?? []).map((r: any) => ({
+    id: r.id, movie_id: r.movie_id, user_id: r.user_id, rating: r.rating,
+  }));
+}
+
 export async function listReviews(): Promise<Review[]> {
   if (!isSupabaseConfigured) return mockReviews();
   const sb = requireSupabase();
@@ -132,6 +141,7 @@ export async function listReviews(): Promise<Review[]> {
     rating: r.rating, body: r.body, created_at: r.created_at,
     upvotes: tally.get(r.id)?.up ?? 0, downvotes: tally.get(r.id)?.down ?? 0,
     featured: r.featured ?? false,
+    background_url: r.background_url ?? null,
   }));
 }
 
@@ -343,9 +353,27 @@ export async function toggleFavorite(movieId: string): Promise<void> {
   await toggleLibraryEntry(movieId, "favorite");
 }
 
+// VaultTab keys use different casing/words than the DB `status` enum.
+const VAULT_STATUS_DB: Record<VaultTab, string> = {
+  watched: "watched",
+  plantowatch: "plan_to_watch",
+  favorites: "favorite",
+};
+
 export async function setVaultStatus(movieId: string, status: VaultTab): Promise<void> {
   if (!isSupabaseConfigured) return mockSetVaultStatus(movieId, status);
-  await toggleLibraryEntry(movieId, status);
+  await toggleLibraryEntry(movieId, VAULT_STATUS_DB[status]);
+}
+
+export async function rateMovie(movieId: string, rating: number): Promise<void> {
+  if (!isSupabaseConfigured) return mockRateMovie(movieId, rating);
+  const sb = requireSupabase();
+  const uid = await currentUserId();
+  if (!uid) return;
+  await sb.from("movie_ratings").upsert(
+    { user_id: uid, movie_id: movieId, rating },
+    { onConflict: "user_id,movie_id" },
+  );
 }
 
 async function toggleLibraryEntry(movieId: string, status: string): Promise<void> {

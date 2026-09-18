@@ -26,6 +26,13 @@ export interface Movie {
   deleted_at?: string | null;
 }
 
+export interface MovieRating {
+  id: string;
+  movie_id: string;
+  user_id: string;
+  rating: number;
+}
+
 export interface Review {
   id: string;
   movie_id: string;

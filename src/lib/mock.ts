@@ -14,6 +14,7 @@ import type {
   Profile,
   Notification,
   Announcement,
+  MovieRating,
 } from "./types"
 
 export const MOCK_USER: Profile = {
@@ -13236,6 +13237,8 @@ const KEYS = {
   announcements: "ac:v2:announcements",
 
   members: "ac:v2:members",
+
+  movieRatings: "ac:v2:movieratings",
 }
 
 function load<T>(key: string, fallback: () => T): T {
@@ -13273,6 +13276,10 @@ export function mockMovies(): Movie[] {
 
 export function mockReviews(): Review[] {
   return load<Review[]>(KEYS.reviews, () => [])
+}
+
+export function mockMovieRatings(): MovieRating[] {
+  return load<MovieRating[]>(KEYS.movieRatings, () => [])
 }
 
 export function mockThreads(): Record<string, Reply[]> {
@@ -13482,6 +13489,27 @@ export function mockSetVaultStatus(movieId: string, status: VaultTab) {
     : [...vault[status], movieId]
 
   save(KEYS.vault, vault)
+}
+
+export function mockRateMovie(movieId: string, rating: number) {
+  const ratings = mockMovieRatings()
+
+  const i = ratings.findIndex(
+    (r) => r.movie_id === movieId && r.user_id === MOCK_USER.id,
+  )
+
+  if (i >= 0) {
+    ratings[i] = { ...ratings[i], rating }
+  } else {
+    ratings.push({
+      id: nextId(ratings, "mr"),
+      movie_id: movieId,
+      user_id: MOCK_USER.id,
+      rating,
+    })
+  }
+
+  save(KEYS.movieRatings, ratings)
 }
 
 export function mockToggleFollow(userId: string) {

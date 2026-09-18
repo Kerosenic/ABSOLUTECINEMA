@@ -9,7 +9,7 @@ import { MOCK_USER } from "./mock";
 import { getSession, setSession, useSession } from "./session";
 import { fetchProfile } from "./api";
 import * as api from "./api";
-import type { Vault, VaultTab, Reply, Review, Notification, Movie, Announcement, Profile, Screening } from "./types";
+import type { Vault, VaultTab, Reply, Review, Notification, Movie, Announcement, Profile, Screening, MovieRating } from "./types";
 
 export { useSession };
 
@@ -87,6 +87,10 @@ export function useDeletedMovies() {
 
 export function useReviews() {
   return useQuery({ queryKey: ["reviews"], queryFn: api.listReviews });
+}
+
+export function useMovieRatings() {
+  return useQuery({ queryKey: ["movieRatings"], queryFn: api.listMovieRatings });
 }
 
 export function useThreads() {
@@ -256,6 +260,23 @@ export function useSetVaultStatus() {
       return patch<Vault>(qc, ["vault", uid], (old) => {
         const has = old[args.status].includes(args.movieId);
         return { ...old, [args.status]: has ? old[args.status].filter((x) => x !== args.movieId) : [...old[args.status], args.movieId] };
+      });
+    },
+  );
+}
+
+export function useRateMovie() {
+  return useOptimisticMutation(
+    (args: { movieId: string; rating: number }) => api.rateMovie(args.movieId, args.rating),
+    [["movieRatings"]],
+    (args, qc) => {
+      const uid = getSession()?.user.id ?? "";
+      return patch<MovieRating[]>(qc, ["movieRatings"], (old) => {
+        const existing = old.find((r) => r.movie_id === args.movieId && r.user_id === uid);
+        if (existing) {
+          return old.map((r) => (r === existing ? { ...r, rating: args.rating } : r));
+        }
+        return [...old, { id: `tmp-${Date.now()}`, movie_id: args.movieId, user_id: uid, rating: args.rating }];
       });
     },
   );
