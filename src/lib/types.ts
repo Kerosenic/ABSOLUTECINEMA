@@ -8,6 +8,7 @@ export interface Profile {
   username: string;
   role: Role;
   avatar_url?: string | null;
+  email?: string | null;
 }
 
 export interface Session {
@@ -68,6 +69,8 @@ export interface Screening {
   time: string;
   location: string;
   poster?: string;
+  movie_id?: string | null;
+  featured?: boolean;
 }
 
 export type VaultTab = "watched" | "plantowatch" | "favorites";

@@ -34,7 +34,7 @@ import {
   type FieldErrors,
 } from "./lib/validation"
 
-import { GENRES, YEARS, RATINGS, TRENDING_IDS } from "./lib/mock"
+import { GENRES, YEARS, RATINGS } from "./lib/mock"
 
 import {
   useInitAuth,
@@ -59,6 +59,7 @@ import {
   useToggleFollow,
   useAddScreening,
   useDeleteScreening,
+  useToggleScreeningFeatured,
   useAddPoll,
   useTogglePoll,
   useDeletePoll,
@@ -1429,6 +1430,114 @@ function RowCard({
   )
 }
 
+// ─── Watching Next Row (featured screenings) ─────────────────────────────────
+
+function WatchingNextRow({ screenings }: { screenings: Screening[] }) {
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  const sorted = [...screenings].sort((a, b) => a.date.localeCompare(b.date))
+
+  const scroll = (dir: "left" | "right") => {
+    rowRef.current?.scrollBy({
+      left: dir === "right" ? 280 : -280,
+      behavior: "smooth",
+    })
+  }
+
+  return (
+    <div className="relative group/row">
+      <SectionHeader label="WATCHING NEXT..." pre="Now Showing" />
+      <div className="relative">
+        <button
+          onClick={() => scroll("left")}
+          aria-label="Scroll left"
+          className="absolute left-0 top-0 bottom-0 z-10 w-10 bg-gradient-to-r from-[var(--background)] to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-start pl-1"
+        >
+          <svg
+            className="w-5 h-5 text-[var(--foreground)]"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M15 19l-7-7 7-7"
+            />
+          </svg>
+        </button>
+        <div
+          ref={rowRef}
+          className="flex gap-3 overflow-x-auto hide-scrollbar pb-2"
+        >
+          {sorted.map((s) => (
+            <ScreeningCard key={s.id} screening={s} />
+          ))}
+        </div>
+        <button
+          onClick={() => scroll("right")}
+          aria-label="Scroll right"
+          className="absolute right-0 top-0 bottom-0 z-10 w-10 bg-gradient-to-l from-[var(--background)] to-transparent opacity-0 group-hover/row:opacity-100 transition-opacity flex items-center justify-end pr-1"
+        >
+          <svg
+            className="w-5 h-5 text-[var(--foreground)]"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2.5}
+              d="M9 5l7 7-7 7"
+            />
+          </svg>
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ScreeningCard({ screening }: { screening: Screening }) {
+  const { day, month } = fmtDate(screening.date)
+
+  return (
+    <div className="group flex-shrink-0 w-32 sm:w-36 cursor-pointer">
+      <div className="relative aspect-[2/3] rounded-xl overflow-hidden bg-[var(--muted)] mb-2">
+        {screening.poster ? (
+          <img
+            src={screening.poster}
+            alt={screening.title}
+            loading="lazy"
+            decoding="async"
+            onError={(e) => {
+              e.currentTarget.style.opacity = "0"
+            }}
+            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+          />
+        ) : (
+          <div className="w-full h-full flex items-center justify-center font-display font-900 text-2xl text-[var(--muted-foreground)]">
+            {day}
+          </div>
+        )}
+        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+        <div className="absolute top-2 left-2">
+          <span className="text-[10px] px-1.5 py-0.5 rounded bg-black/60 backdrop-blur text-white font-medium">
+            {month} {day}
+          </span>
+        </div>
+      </div>
+      <p className="text-xs font-semibold text-[var(--foreground)] truncate leading-tight">
+        {screening.title}
+      </p>
+      <p className="text-[10px] text-[var(--muted-foreground)] mt-0.5">
+        {screening.time}
+      </p>
+    </div>
+  )
+}
+
 // ─── Review Card ──────────────────────────────────────────────────────────────
 
 function ReviewCard({
@@ -2078,6 +2187,7 @@ function HomePage({
   onToggleFavorite,
   onWriteReview,
   announcements,
+  screenings,
 }: {
   movies: Movie[]
   reviews: Review[]
@@ -2095,6 +2205,7 @@ function HomePage({
   onWriteReview: (movieId: string, rating: number, body: string) => void
 
   announcements: Announcement[]
+  screenings: Screening[]
 }) {
   const [genre, setGenre] = useState("All")
 
@@ -2203,15 +2314,10 @@ function HomePage({
         </section>
       )}
 
-      {/* Trending Row */}
+      {/* Watching Next Row — mirrors featured calendar screenings */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-12 pb-6">
-        <MovieRow
-          title="WATCHING NEXT..."
-          pre="Now Showing"
-          movieIds={TRENDING_IDS}
-          movies={movies}
-          favorites={favorites}
-          onToggleFavorite={onToggleFavorite}
+        <WatchingNextRow
+          screenings={screenings.filter((s) => s.featured)}
         />
       </section>
 
@@ -3570,6 +3676,7 @@ function AdminPage({
   screenings,
   onAddScreening,
   onDeleteScreening,
+  onToggleScreeningFeatured,
   polls,
   onAddPoll,
   onTogglePoll,
@@ -3590,11 +3697,13 @@ function AdminPage({
   onDeleteAnnouncement,
   onSetMemberRole,
   onSetReviewFeatured,
+  onDeleteAccount,
   session,
 }: {
   screenings: Screening[]
   onAddScreening: (s: Omit<Screening, "id">) => void
   onDeleteScreening: (id: string) => void
+  onToggleScreeningFeatured: (id: string) => void
 
   polls: Poll[]
   onAddPoll: (question: string, closes: string, options: string[]) => void
@@ -3653,6 +3762,10 @@ function AdminPage({
   const [sQuery, setSQuery] = useState("")
 
   const [sOpen, setSOpen] = useState(false)
+
+  const [sMovieId, setSMovieId] = useState<string | null>(null)
+
+  const [sPoster, setSPoster] = useState("")
 
   // Poll form
 
@@ -3714,6 +3827,8 @@ function AdminPage({
   const selectScreeningMovie = (m: Movie) => {
     setSTitle(m.title)
     setSQuery(m.title)
+    setSMovieId(m.id)
+    setSPoster(m.poster)
     setSOpen(false)
 
     setSErrors((f) => ({ ...f, title: "" }))
@@ -3736,6 +3851,8 @@ function AdminPage({
       date: data.date,
       time: data.time,
       location: data.location || "Streaming",
+      movie_id: sMovieId,
+      poster: sPoster || undefined,
     })
 
     setSTitle("")
@@ -3743,6 +3860,8 @@ function AdminPage({
     setSTime("")
     setSLoc("")
     setSQuery("")
+    setSMovieId(null)
+    setSPoster("")
     setSOpen(false)
   }
 
@@ -3975,6 +4094,13 @@ function AdminPage({
                   key={s.id}
                   className="flex items-center gap-3 border border-[var(--border)] rounded-lg px-3 py-2"
                 >
+                  <button
+                    onClick={() => onToggleScreeningFeatured(s.id)}
+                    className="shrink-0 text-xl transition-colors hover:scale-110"
+                    title={s.featured ? "Remove from WATCHING NEXT" : "Add to WATCHING NEXT"}
+                  >
+                    {s.featured ? "⭐" : "☆"}
+                  </button>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-semibold text-[var(--foreground)] truncate">
                       {s.title}
@@ -4788,6 +4914,8 @@ export default function App() {
 
   const deleteScreening = useDeleteScreening()
 
+  const toggleScreeningFeatured = useToggleScreeningFeatured()
+
   const addPoll = useAddPoll()
 
   const togglePoll = useTogglePoll()
@@ -4894,6 +5022,12 @@ export default function App() {
 
   const onDeleteScreening = (id: string) => {
     deleteScreening.mutate(id, { onSuccess: () => push("Screening removed") })
+  }
+
+  const onToggleScreeningFeatured = (id: string) => {
+    toggleScreeningFeatured.mutate(id, {
+      onSuccess: () => push("Featured status updated"),
+    })
   }
 
   const onAddPoll = (question: string, closes: string, options: string[]) => {
@@ -5010,6 +5144,7 @@ export default function App() {
   const onDeleteAccount = (userId: string) => {
     deleteAccount.mutate(userId, {
       onSuccess: () => push("Account deleted"),
+      onError: (e) => push(e.message || "Delete failed"),
     })
   }
 
@@ -5049,6 +5184,7 @@ export default function App() {
             onToggleFavorite={onToggleFavorite}
             onWriteReview={onWriteReview}
             announcements={announcementsData}
+            screenings={screeningsData}
           />
         )}
         {page === "calendar" && (
@@ -5076,6 +5212,7 @@ export default function App() {
               screenings={screeningsData}
               onAddScreening={onAddScreening}
               onDeleteScreening={onDeleteScreening}
+              onToggleScreeningFeatured={onToggleScreeningFeatured}
               polls={pollsData}
               onAddPoll={onAddPoll}
               onTogglePoll={onTogglePoll}

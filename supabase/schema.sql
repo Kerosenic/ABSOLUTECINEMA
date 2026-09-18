@@ -111,6 +111,7 @@ create table if not exists public.screenings (
   time time not null,
   location text not null default 'Streaming',
   notes text,
+  featured boolean not null default false,
   created_by uuid references public.profiles(id) on delete set null
 );
 
@@ -193,12 +194,15 @@ alter table public.rsvps          enable row level security;
 alter table public.notifications  enable row level security;
 alter table public.announcements enable row level security;
 
--- profiles: public read, owner write (insert via trigger)
+-- profiles: public read, owner write (insert via trigger), admin delete
 drop policy if exists "profiles public read" on public.profiles;
 create policy "profiles public read" on public.profiles for select using (true);
 drop policy if exists "profiles owner update" on public.profiles;
 create policy "profiles owner update" on public.profiles for update
   using (auth.uid() = id) with check (auth.uid() = id);
+drop policy if exists "profiles admin delete" on public.profiles;
+create policy "profiles admin delete" on public.profiles for delete
+  using (is_admin());
 
 -- movies: public read (active only), admin write (incl. deleted)
 drop policy if exists "movies public read" on public.movies;

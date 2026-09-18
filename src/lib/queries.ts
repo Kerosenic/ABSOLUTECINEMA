@@ -9,7 +9,7 @@ import { MOCK_USER } from "./mock";
 import { getSession, setSession, useSession } from "./session";
 import { fetchProfile } from "./api";
 import * as api from "./api";
-import type { Vault, VaultTab, Reply, Review, Notification, Movie, Announcement, Profile } from "./types";
+import type { Vault, VaultTab, Reply, Review, Notification, Movie, Announcement, Profile, Screening } from "./types";
 
 export { useSession };
 
@@ -23,18 +23,18 @@ export function useInitAuth() {
     }
     const sb = requireSupabase();
     let active = true;
-    const apply = (userId: string | undefined) => {
+    const apply = (userId: string | undefined, email?: string | null) => {
       if (!userId) {
         setSession(null);
         qc.clear();
         return;
       }
       fetchProfile(userId).then((profile) => {
-        if (active) setSession(profile ? { user: profile } : null);
+        if (active) setSession(profile ? { user: { ...profile, email: email ?? null } } : null);
       });
     };
     // onAuthStateChange fires immediately with current session, no need for separate getSession() call
-    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => apply(s?.user?.id));
+    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => apply(s?.user?.id, s?.user?.email));
     return () => {
       active = false;
       sub.subscription.unsubscribe();
@@ -261,6 +261,17 @@ export function useAddScreening() {
 
 export function useDeleteScreening() {
   return useOptimisticMutation((id: string) => api.deleteScreening(id), [["screenings"]]);
+}
+
+export function useToggleScreeningFeatured() {
+  return useOptimisticMutation(
+    (id: string) => api.toggleScreeningFeatured(id),
+    [["screenings"]],
+    (id, qc) =>
+      patch<Screening[]>(qc, ["screenings"], (old) =>
+        old.map((s) => (s.id === id ? { ...s, featured: !s.featured } : s)),
+      ),
+  );
 }
 
 export function useAddPoll() {

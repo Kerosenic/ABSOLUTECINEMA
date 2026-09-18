@@ -13131,6 +13131,7 @@ export function seedScreenings(): Screening[] {
     time: string,
     location: string,
     poster: string,
+    featured = false,
   ): Screening => {
     const d = new Date(now)
 
@@ -13143,6 +13144,8 @@ export function seedScreenings(): Screening[] {
       location,
       poster,
       date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
+      movie_id: null,
+      featured,
     }
   }
 
@@ -13154,6 +13157,7 @@ export function seedScreenings(): Screening[] {
       "8:00 PM",
       "The Roxy Cinema, Brooklyn",
       "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/e/e8/Eraserhead_poster.jpg&w=500",
+      true,
     ),
 
     mk(
@@ -13163,6 +13167,7 @@ export function seedScreenings(): Screening[] {
       "7:30 PM",
       "IFC Center, Manhattan",
       "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/0/0f/Mulholland_Drive_poster.jpg&w=500",
+      true,
     ),
 
     mk(
@@ -13172,6 +13177,7 @@ export function seedScreenings(): Screening[] {
       "9:00 PM",
       "Alamo Drafthouse, LIC",
       "https://wsrv.nl/?url=https://upload.wikimedia.org/wikipedia/en/e/ef/2001_A_Space_Odyssey_%281968%29.png&w=500",
+      true,
     ),
 
     mk(
@@ -13266,11 +13272,11 @@ export function mockMovies(): Movie[] {
 }
 
 export function mockReviews(): Review[] {
-  return load<Review[]>(KEYS.reviews, () => REVIEWS)
+  return load<Review[]>(KEYS.reviews, () => [])
 }
 
 export function mockThreads(): Record<string, Reply[]> {
-  return load<Record<string, Reply[]>>(KEYS.threads, () => REPLY_THREADS)
+  return load<Record<string, Reply[]>>(KEYS.threads, () => ({}))
 }
 
 export function mockUserVotes(): Record<string, "up" | "down" | null> {
@@ -13503,6 +13509,14 @@ export function mockDeleteScreening(id: string) {
   save(
     KEYS.screenings,
     mockScreenings().filter((x) => x.id !== id),
+  )
+}
+
+export function mockToggleScreeningFeatured(id: string) {
+  const screenings = mockScreenings()
+  save(
+    KEYS.screenings,
+    screenings.map((s) => (s.id === id ? { ...s, featured: !s.featured } : s)),
   )
 }
 

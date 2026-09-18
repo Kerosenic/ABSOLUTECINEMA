@@ -12,7 +12,7 @@ import {
   mockScreenings, mockVault, mockFollowing, mockNotifications, mockMarkNotificationsRead,
   mockVoteReview, mockAddReply, mockCreateReview, mockCastPollVote,
   mockToggleFavorite, mockSetVaultStatus, mockToggleFollow,
-  mockAddScreening, mockDeleteScreening, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview,
+  mockAddScreening, mockDeleteScreening, mockToggleScreeningFeatured, mockAddPoll, mockTogglePoll, mockDeletePoll, mockDeleteReview,
   mockAddMovie, mockDeleteMovie, mockRestoreMovie, mockDeleteComment,
   mockMembers, mockSetMemberRole, mockAnnouncements, mockAddAnnouncement, mockDeleteAnnouncement,
   mockSetReviewFeatured, mockUpdateUsername,
@@ -39,7 +39,7 @@ export async function signInEmail(email: string, password: string): Promise<Sess
   const { data, error } = await sb.auth.signInWithPassword({ email, password });
   if (error) throw error;
   const profile = data.user ? await fetchProfile(data.user.id) : null;
-  return profile ? { user: profile } : null;
+  return profile ? { user: { ...profile, email: data.user?.email ?? null } } : null;
 }
 
 function assertTsinglan(email: string): void {
@@ -175,6 +175,7 @@ export async function listScreenings(): Promise<Screening[]> {
   const { data } = await sb.from("screenings").select("*").order("date", { ascending: true });
   return (data ?? []).map((s: any) => ({
     id: s.id, title: s.title, date: s.date, time: to12h(s.time), location: s.location,
+    movie_id: s.movie_id || null, featured: s.featured || false, poster: s.poster_url || undefined,
   }));
 }
 
@@ -374,12 +375,20 @@ export async function addScreening(input: Omit<Screening, "id">): Promise<void> 
   const sb = requireSupabase();
   await sb.from("screenings").insert({
     title: input.title, date: input.date, time: input.time, location: input.location,
+    movie_id: input.movie_id || null, featured: input.featured || false, poster_url: input.poster || null,
   });
 }
 
 export async function deleteScreening(id: string): Promise<void> {
   if (!isSupabaseConfigured) { mockDeleteScreening(id); return; }
   await requireSupabase().from("screenings").delete().eq("id", id);
+}
+
+export async function toggleScreeningFeatured(id: string): Promise<void> {
+  if (!isSupabaseConfigured) { mockToggleScreeningFeatured(id); return; }
+  const sb = requireSupabase();
+  const { data } = await sb.from("screenings").select("featured").eq("id", id).maybeSingle();
+  await sb.from("screenings").update({ featured: !(data?.featured ?? false) }).eq("id", id);
 }
 
 export async function addPoll(input: { question: string; closes: string; options: string[] }): Promise<void> {
@@ -483,11 +492,10 @@ export async function updateUsername(username: string): Promise<void> {
 
 export async function deleteAccount(userId: string): Promise<void> {
   if (!isSupabaseConfigured) return;
-  const sb = requireSupabase();
-  // Delete profile (cascade will handle related data via RLS/triggers)
-  await sb.from("profiles").delete().eq("id", userId);
-  // Call auth admin API to delete the user account
-  await sb.auth.admin.deleteUser(userId);
+  // Browser client lacks the service-role key for auth.admin.deleteUser and
+  // profiles has no DELETE RLS policy, so deletion happens in the delete-user
+  // edge function (which verifies the caller is admin).
+  await invoke("delete-user", { userId });
 }
 
 // ─── Storage ─────────────────────────────────────────────────────────────────
