@@ -33,7 +33,7 @@ export function useInitAuth() {
         if (active) setSession(profile ? { user: profile } : null);
       });
     };
-    sb.auth.getSession().then(({ data }) => apply(data.session?.user?.id));
+    // onAuthStateChange fires immediately with current session, no need for separate getSession() call
     const { data: sub } = sb.auth.onAuthStateChange((_event, s) => apply(s?.user?.id));
     return () => {
       active = false;
