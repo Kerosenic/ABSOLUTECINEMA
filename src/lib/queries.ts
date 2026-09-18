@@ -33,8 +33,25 @@ export function useInitAuth() {
         if (active) setSession(profile ? { user: { ...profile, email: email ?? null } } : null);
       });
     };
-    // onAuthStateChange fires immediately with current session, no need for separate getSession() call
-    const { data: sub } = sb.auth.onAuthStateChange((_event, s) => apply(s?.user?.id, s?.user?.email));
+    // Restore a persisted session on load / new tab. The INITIAL_SESSION event
+    // from onAuthStateChange can fire with a null session before the client
+    // finishes recovering from storage, so getSession() is the authoritative
+    // restore path.
+    sb.auth.getSession().then(({ data }) => {
+      if (active) apply(data.session?.user?.id, data.session?.user?.email);
+    });
+    // Track live auth changes (sign in, sign out, token refresh).
+    const { data: sub } = sb.auth.onAuthStateChange((event, s) => {
+      if (event === "SIGNED_OUT") {
+        // Token refresh can emit a transient SIGNED_OUT; only clear when the
+        // session is actually gone.
+        sb.auth.getSession().then(({ data }) => {
+          if (active && !data.session) apply(undefined);
+        });
+        return;
+      }
+      apply(s?.user?.id, s?.user?.email);
+    });
     return () => {
       active = false;
       sub.subscription.unsubscribe();
